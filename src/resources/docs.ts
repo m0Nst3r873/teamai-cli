@@ -1,19 +1,19 @@
 import path from 'node:path';
 import fse from 'fs-extra';
 import { ResourceHandler } from './base.js';
-import type { ResourceItem, TadConfig, LocalConfig } from '../types.js';
+import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
 import { pathExists, copyDir, expandHome } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 
 export class DocsHandler extends ResourceHandler {
   readonly type = 'docs' as const;
 
-  async scanLocalForPush(_teamConfig: TadConfig, _localConfig: LocalConfig): Promise<ResourceItem[]> {
+  async scanLocalForPush(_teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<ResourceItem[]> {
     // Docs are managed directly in team repo
     return [];
   }
 
-  async scanTeamForPull(_teamConfig: TadConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
+  async scanTeamForPull(_teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
     const docsDir = path.join(localConfig.repo.localPath, 'docs');
     if (!await pathExists(docsDir)) return [];
 
@@ -25,14 +25,14 @@ export class DocsHandler extends ResourceHandler {
     }];
   }
 
-  async pushItem(_item: ResourceItem, _teamConfig: TadConfig, _localConfig: LocalConfig): Promise<void> {
+  async pushItem(_item: ResourceItem, _teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
     // No-op
   }
 
   /**
    * Sync docs from team repo to local docs directory.
    */
-  async pullItem(item: ResourceItem, teamConfig: TadConfig, _localConfig: LocalConfig): Promise<void> {
+  async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
     const localDocsDir = expandHome(teamConfig.sharing.docs.localDir);
     try {
       await copyDir(item.sourcePath, localDocsDir);

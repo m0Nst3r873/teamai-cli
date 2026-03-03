@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { ResourceHandler } from './base.js';
-import type { ResourceItem, TadConfig, LocalConfig } from '../types.js';
+import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
 import { listDirs, pathExists, copyDir } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 
@@ -10,7 +10,7 @@ export class SkillsHandler extends ResourceHandler {
   /**
    * Scan local AI tool skill directories for skills not in the team repo.
    */
-  async scanLocalForPush(teamConfig: TadConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
+  async scanLocalForPush(teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
     const teamSkillsDir = path.join(localConfig.repo.localPath, 'skills');
     const teamSkills = new Set(await listDirs(teamSkillsDir));
 
@@ -45,7 +45,7 @@ export class SkillsHandler extends ResourceHandler {
   /**
    * Scan team repo for skills to pull.
    */
-  async scanTeamForPull(teamConfig: TadConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
+  async scanTeamForPull(teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
     const teamSkillsDir = path.join(localConfig.repo.localPath, 'skills');
     const dirs = await listDirs(teamSkillsDir);
 
@@ -60,7 +60,7 @@ export class SkillsHandler extends ResourceHandler {
   /**
    * Copy a local skill to the team repo.
    */
-  async pushItem(item: ResourceItem, _teamConfig: TadConfig, localConfig: LocalConfig): Promise<void> {
+  async pushItem(item: ResourceItem, _teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<void> {
     const dest = path.join(localConfig.repo.localPath, 'skills', item.name);
     await copyDir(item.sourcePath, dest);
     log.debug(`Copied skill ${item.name} → team repo`);
@@ -69,7 +69,7 @@ export class SkillsHandler extends ResourceHandler {
   /**
    * Pull a skill from team repo to all configured AI tool directories.
    */
-  async pullItem(item: ResourceItem, teamConfig: TadConfig, _localConfig: LocalConfig): Promise<void> {
+  async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
     const syncTargets = teamConfig.sharing.skills.syncTargets;
 
     for (const tool of syncTargets) {

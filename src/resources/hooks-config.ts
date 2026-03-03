@@ -1,7 +1,7 @@
 import path from 'node:path';
 import YAML from 'yaml';
 import { ResourceHandler } from './base.js';
-import type { ResourceItem, TadConfig, LocalConfig } from '../types.js';
+import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
 import { pathExists, readFileSafe, readJson, writeJson } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 import { TEAMAI_HOOK_DESCRIPTION_PREFIX } from '../types.js';
@@ -29,12 +29,12 @@ interface SettingsJson {
 export class HooksConfigHandler extends ResourceHandler {
   readonly type = 'hooks' as const;
 
-  async scanLocalForPush(_teamConfig: TadConfig, _localConfig: LocalConfig): Promise<ResourceItem[]> {
+  async scanLocalForPush(_teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<ResourceItem[]> {
     // Hooks are managed directly in team repo
     return [];
   }
 
-  async scanTeamForPull(_teamConfig: TadConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
+  async scanTeamForPull(_teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
     const hooksYamlPath = path.join(localConfig.repo.localPath, 'hooks', 'hooks.yaml');
     if (!await pathExists(hooksYamlPath)) return [];
 
@@ -46,14 +46,14 @@ export class HooksConfigHandler extends ResourceHandler {
     }];
   }
 
-  async pushItem(_item: ResourceItem, _teamConfig: TadConfig, _localConfig: LocalConfig): Promise<void> {
+  async pushItem(_item: ResourceItem, _teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
     // No-op
   }
 
   /**
    * Merge team hooks from hooks.yaml into each AI tool's settings.json
    */
-  async pullItem(item: ResourceItem, teamConfig: TadConfig, _localConfig: LocalConfig): Promise<void> {
+  async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
     const content = await readFileSafe(item.sourcePath);
     if (!content) return;
 

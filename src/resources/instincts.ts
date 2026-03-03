@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { ResourceHandler } from './base.js';
-import type { ResourceItem, TadConfig, LocalConfig } from '../types.js';
+import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
 import { listDirs, listFiles, pathExists, copyDir, copyFile, expandHome } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 
@@ -12,7 +12,7 @@ export class InstinctsHandler extends ResourceHandler {
   /**
    * Scan CL-v2 homunculus instincts for items to push.
    */
-  async scanLocalForPush(teamConfig: TadConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
+  async scanLocalForPush(teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
     const home = process.env.HOME ?? '';
     const instinctsDir = path.join(home, HOMUNCULUS_DIR, 'instincts', 'personal');
     const teamInstinctsDir = path.join(localConfig.repo.localPath, 'instincts', localConfig.username);
@@ -66,7 +66,7 @@ export class InstinctsHandler extends ResourceHandler {
   /**
    * Scan team repo for instincts to pull (from all members).
    */
-  async scanTeamForPull(teamConfig: TadConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
+  async scanTeamForPull(teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
     const teamInstinctsDir = path.join(localConfig.repo.localPath, 'instincts');
     const items: ResourceItem[] = [];
 
@@ -93,7 +93,7 @@ export class InstinctsHandler extends ResourceHandler {
   /**
    * Copy a local instinct to the team repo under the user's directory.
    */
-  async pushItem(item: ResourceItem, _teamConfig: TadConfig, localConfig: LocalConfig): Promise<void> {
+  async pushItem(item: ResourceItem, _teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<void> {
     const dest = path.join(localConfig.repo.localPath, item.relativePath);
     await copyFile(item.sourcePath, dest);
     log.debug(`Copied instinct ${item.name} → team repo`);
@@ -102,7 +102,7 @@ export class InstinctsHandler extends ResourceHandler {
   /**
    * Pull instincts from team repo to CL-v2 inherited directory.
    */
-  async pullItem(item: ResourceItem, _teamConfig: TadConfig, _localConfig: LocalConfig): Promise<void> {
+  async pullItem(item: ResourceItem, _teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
     const home = process.env.HOME ?? '';
     const inheritedDir = path.join(home, HOMUNCULUS_DIR, 'instincts', 'inherited');
 

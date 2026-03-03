@@ -1,4 +1,4 @@
-import type { ResourceType, ResourceItem, ResourceDiff, TadConfig, LocalConfig } from '../types.js';
+import type { ResourceType, ResourceItem, ResourceDiff, TeamaiConfig, LocalConfig } from '../types.js';
 
 /**
  * Abstract base class for resource handlers.
@@ -12,7 +12,7 @@ export abstract class ResourceHandler {
    * Returns items found locally that are not yet in the team repo.
    */
   abstract scanLocalForPush(
-    teamConfig: TadConfig,
+    teamConfig: TeamaiConfig,
     localConfig: LocalConfig,
   ): Promise<ResourceItem[]>;
 
@@ -21,7 +21,7 @@ export abstract class ResourceHandler {
    * Returns items from the team repo.
    */
   abstract scanTeamForPull(
-    teamConfig: TadConfig,
+    teamConfig: TeamaiConfig,
     localConfig: LocalConfig,
   ): Promise<ResourceItem[]>;
 
@@ -30,7 +30,7 @@ export abstract class ResourceHandler {
    */
   abstract pushItem(
     item: ResourceItem,
-    teamConfig: TadConfig,
+    teamConfig: TeamaiConfig,
     localConfig: LocalConfig,
   ): Promise<void>;
 
@@ -39,7 +39,7 @@ export abstract class ResourceHandler {
    */
   abstract pullItem(
     item: ResourceItem,
-    teamConfig: TadConfig,
+    teamConfig: TeamaiConfig,
     localConfig: LocalConfig,
   ): Promise<void>;
 
@@ -47,7 +47,7 @@ export abstract class ResourceHandler {
    * Compute diff between local and team repo for this resource type.
    */
   async diff(
-    teamConfig: TadConfig,
+    teamConfig: TeamaiConfig,
     localConfig: LocalConfig,
   ): Promise<ResourceDiff> {
     const localItems = await this.scanLocalForPush(teamConfig, localConfig);

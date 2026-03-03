@@ -22,7 +22,7 @@ export const SharingConfigSchema = z.object({
   }).default({}),
 });
 
-export const TadConfigSchema = z.object({
+export const TeamaiConfigSchema = z.object({
   team: z.string(),
   description: z.string().default(''),
   repo: z.string(),
@@ -35,7 +35,7 @@ export const TadConfigSchema = z.object({
   }),
 });
 
-export type TadConfig = z.infer<typeof TadConfigSchema>;
+export type TeamaiConfig = z.infer<typeof TeamaiConfigSchema>;
 
 // ─── Member config (members/<user>.yaml) ────────────────
 

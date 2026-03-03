@@ -1,6 +1,6 @@
 import path from 'node:path';
 import { ResourceHandler } from './base.js';
-import type { ResourceItem, TadConfig, LocalConfig } from '../types.js';
+import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
 import { listFiles, pathExists, readFileSafe, writeFile } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 import { TEAMAI_RULES_START, TEAMAI_RULES_END } from '../types.js';
@@ -8,12 +8,12 @@ import { TEAMAI_RULES_START, TEAMAI_RULES_END } from '../types.js';
 export class RulesHandler extends ResourceHandler {
   readonly type = 'rules' as const;
 
-  async scanLocalForPush(_teamConfig: TadConfig, _localConfig: LocalConfig): Promise<ResourceItem[]> {
+  async scanLocalForPush(_teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<ResourceItem[]> {
     // Rules are typically created directly in the team repo, not pushed from local
     return [];
   }
 
-  async scanTeamForPull(_teamConfig: TadConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
+  async scanTeamForPull(_teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
     const rulesDir = path.join(localConfig.repo.localPath, 'rules');
     if (!await pathExists(rulesDir)) return [];
 
@@ -28,7 +28,7 @@ export class RulesHandler extends ResourceHandler {
       }));
   }
 
-  async pushItem(_item: ResourceItem, _teamConfig: TadConfig, _localConfig: LocalConfig): Promise<void> {
+  async pushItem(_item: ResourceItem, _teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
     // No-op: rules are managed directly in team repo
   }
 
@@ -36,14 +36,14 @@ export class RulesHandler extends ResourceHandler {
    * Pull rules from team repo and merge into CLAUDE.md files.
    * Uses marker comments to manage teamai-injected sections.
    */
-  async pullItem(item: ResourceItem, teamConfig: TadConfig, _localConfig: LocalConfig): Promise<void> {
+  async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
     // This is handled in bulk by pullAllRules
   }
 
   /**
    * Merge all rules into CLAUDE.md for each AI tool that has a claudemd path.
    */
-  async pullAllRules(teamConfig: TadConfig, localConfig: LocalConfig): Promise<void> {
+  async pullAllRules(teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<void> {
     const rules = await this.scanTeamForPull(teamConfig, localConfig);
     if (rules.length === 0) return;
 

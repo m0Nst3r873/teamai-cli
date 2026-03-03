@@ -1,12 +1,12 @@
 import YAML from 'yaml';
 import path from 'node:path';
 import {
-  TadConfigSchema,
+  TeamaiConfigSchema,
   LocalConfigSchema,
   StateSchema,
   TEAMAI_CONFIG_PATH,
   TEAMAI_STATE_PATH,
-  type TadConfig,
+  type TeamaiConfig,
   type LocalConfig,
   type State,
 } from './types.js';
@@ -16,7 +16,7 @@ import { log } from './utils/logger.js';
 /**
  * Load the team config (teamai.yaml) from the team repo
  */
-export async function loadTeamConfig(repoPath: string): Promise<TadConfig | null> {
+export async function loadTeamConfig(repoPath: string): Promise<TeamaiConfig | null> {
   const content = await readFileSafe(path.join(repoPath, 'teamai.yaml'));
   if (!content) {
     log.debug('teamai.yaml not found in repo');
@@ -24,7 +24,7 @@ export async function loadTeamConfig(repoPath: string): Promise<TadConfig | null
   }
   try {
     const raw = YAML.parse(content);
-    return TadConfigSchema.parse(raw);
+    return TeamaiConfigSchema.parse(raw);
   } catch (e) {
     log.error(`Invalid teamai.yaml: ${(e as Error).message}`);
     return null;
@@ -72,7 +72,7 @@ export async function saveState(state: State): Promise<void> {
 /**
  * Require that teamai is initialized (local config exists)
  */
-export async function requireInit(): Promise<{ localConfig: LocalConfig; teamConfig: TadConfig }> {
+export async function requireInit(): Promise<{ localConfig: LocalConfig; teamConfig: TeamaiConfig }> {
   const localConfig = await loadLocalConfig();
   if (!localConfig) {
     throw new Error('teamai is not initialized. Run `teamai init` first.');
