@@ -43,7 +43,7 @@ function getToken(): string {
   if (!token) {
     throw new Error(
       'TGIT_TOKEN environment variable is not set.\n' +
-      '  Get a token from https://git.woa.com/profile/personal_access_tokens\n' +
+      '  Get a token from https://git.woa.com/profile/account\n' +
       '  Then add it to your shell profile:\n' +
       '    bash: echo \'export TGIT_TOKEN=your_token\' >> ~/.bashrc && source ~/.bashrc\n' +
       '    zsh:  echo \'export TGIT_TOKEN=your_token\' >> ~/.zshrc && source ~/.zshrc\n' +

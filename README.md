@@ -23,7 +23,7 @@ git clone https://git.woa.com/teamai/teamai-cli.git ~/.teamai/teamai-cli \
 设置 TGit Personal Access Token（需要 `api` 权限）：
 
 ```bash
-# 获取 token: https://git.woa.com/profile/personal_access_tokens
+# 获取 token: https://git.woa.com/profile/account
 # bash 用户
 echo 'export TGIT_TOKEN=your_token_here' >> ~/.bashrc && source ~/.bashrc
 # zsh 用户 (macOS 默认)

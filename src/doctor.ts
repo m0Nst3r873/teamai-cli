@@ -18,7 +18,7 @@ export async function doctor(options: GlobalOptions): Promise<void> {
     {
       name: 'TGIT_TOKEN is set',
       check: async () => !!process.env.TGIT_TOKEN,
-      fix: 'Set TGIT_TOKEN env var. Get a token from https://git.woa.com/profile/personal_access_tokens',
+      fix: 'Set TGIT_TOKEN env var. Get a token from https://git.woa.com/profile/account',
     },
     {
       name: 'Local config exists (~/.teamai/config.yaml)',

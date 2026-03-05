@@ -76,7 +76,7 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
     log.info('Set TGIT_TOKEN via one of these methods:');
     log.info('  1. Shell profile: export TGIT_TOKEN=xxx (in ~/.bashrc or ~/.zshrc)');
     log.info('  2. Env file: echo "TGIT_TOKEN=xxx" > ~/.teamai/env');
-    log.info('Get a token from: https://git.woa.com/profile/personal_access_tokens');
+    log.info('Get a token from: https://git.woa.com/profile/account');
     process.exit(1);
   }
 
