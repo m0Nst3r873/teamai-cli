@@ -7,7 +7,7 @@ const program = new Command();
 program
   .name('teamai')
   .description('Team AI DevKit — 团队 AI 经验共享框架')
-  .version('0.1.3')
+  .version('0.1.6')
   .option('--dry-run', 'Preview mode, no changes made')
   .option('-v, --verbose', 'Verbose output')
   .hook('preAction', (thisCommand) => {
@@ -73,13 +73,32 @@ program
     await list(type, globalOpts);
   });
 
-program
+const membersCmd = program
   .command('members')
+  .description('Manage team members')
+  .action(async () => {
+    // Default action: list members (backward compatible)
+    const globalOpts = program.opts() as GlobalOptions;
+    const { listMembers } = await import('./members.js');
+    await listMembers(globalOpts);
+  });
+
+membersCmd
+  .command('list')
   .description('List team members')
   .action(async () => {
     const globalOpts = program.opts() as GlobalOptions;
     const { listMembers } = await import('./members.js');
     await listMembers(globalOpts);
+  });
+
+membersCmd
+  .command('add')
+  .description('Add a team member (requires write role)')
+  .action(async () => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { addMember } = await import('./members.js');
+    await addMember(globalOpts);
   });
 
 program
