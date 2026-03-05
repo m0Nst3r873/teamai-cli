@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { ResourceHandler } from './base.js';
 import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
-import { listDirs, pathExists, copyDir } from '../utils/fs.js';
+import { listDirs, pathExists, copyDir, remove } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 
 export class SkillsHandler extends ResourceHandler {
@@ -84,5 +84,35 @@ export class SkillsHandler extends ResourceHandler {
         log.warn(`Failed to sync skill ${item.name} to ${tool}: ${(e as Error).message}`);
       }
     }
+  }
+
+  /**
+   * Remove a skill from the team repo and all local AI tool directories.
+   */
+  async removeItem(name: string, teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<string[]> {
+    const removed: string[] = [];
+    const home = process.env.HOME ?? '';
+
+    // Remove from team repo
+    const teamDir = path.join(localConfig.repo.localPath, 'skills', name);
+    if (await pathExists(teamDir)) {
+      await remove(teamDir);
+      removed.push(teamDir);
+    }
+
+    // Remove from each tool's skills directory
+    const syncTargets = teamConfig.sharing.skills.syncTargets;
+    for (const tool of syncTargets) {
+      const toolPath = teamConfig.toolPaths[tool];
+      if (!toolPath) continue;
+      const skillDir = path.join(home, toolPath.skills, name);
+      if (await pathExists(skillDir)) {
+        await remove(skillDir);
+        removed.push(skillDir);
+        log.debug(`Removed skill ${name} from ${tool}`);
+      }
+    }
+
+    return removed;
   }
 }

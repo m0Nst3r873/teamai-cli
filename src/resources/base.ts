@@ -44,6 +44,16 @@ export abstract class ResourceHandler {
   ): Promise<void>;
 
   /**
+   * Remove a resource from the team repo and all local AI tool directories.
+   * Returns the list of paths that were removed.
+   */
+  abstract removeItem(
+    name: string,
+    teamConfig: TeamaiConfig,
+    localConfig: LocalConfig,
+  ): Promise<string[]>;
+
+  /**
    * Compute diff between local and team repo for this resource type.
    */
   async diff(

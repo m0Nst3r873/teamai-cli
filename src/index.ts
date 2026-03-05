@@ -7,7 +7,7 @@ const program = new Command();
 program
   .name('teamai')
   .description('Team AI DevKit — 团队 AI 经验共享框架')
-  .version('0.1.6')
+  .version('0.1.8')
   .option('--dry-run', 'Preview mode, no changes made')
   .option('-v, --verbose', 'Verbose output')
   .hook('preAction', (thisCommand) => {
@@ -99,6 +99,15 @@ membersCmd
     const globalOpts = program.opts() as GlobalOptions;
     const { addMember } = await import('./members.js');
     await addMember(globalOpts);
+  });
+
+program
+  .command('remove <type> <name>')
+  .description('Remove a resource from team repo and all local AI tools (type: skills|rules)')
+  .action(async (type, name) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { remove } = await import('./remove.js');
+    await remove(type, name, globalOpts);
   });
 
 program

@@ -108,4 +108,9 @@ export class HooksConfigHandler extends ResourceHandler {
       }
     }
   }
+
+  async removeItem(_name: string, _teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<string[]> {
+    log.warn('Removing hooks is not supported via remove command. Edit hooks/hooks.yaml directly.');
+    return [];
+  }
 }

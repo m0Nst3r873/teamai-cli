@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { ResourceHandler } from './base.js';
 import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
-import { listFiles, pathExists, readFileSafe, writeFile, copyFile, ensureDir } from '../utils/fs.js';
+import { listFiles, pathExists, readFileSafe, writeFile, copyFile, ensureDir, remove } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 import { TEAMAI_RULES_START, TEAMAI_RULES_END } from '../types.js';
 
@@ -88,6 +88,38 @@ export class RulesHandler extends ResourceHandler {
         log.warn(`Failed to sync rule ${item.name} to ${tool}: ${(e as Error).message}`);
       }
     }
+  }
+
+  /**
+   * Remove a rule from the team repo and all local AI tool rules/ directories.
+   */
+  async removeItem(name: string, teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<string[]> {
+    const removed: string[] = [];
+    const home = process.env.HOME ?? '';
+    const fileName = `${name}.md`;
+
+    // Remove from team repo
+    const teamFile = path.join(localConfig.repo.localPath, 'rules', fileName);
+    if (await pathExists(teamFile)) {
+      await remove(teamFile);
+      removed.push(teamFile);
+    }
+
+    // Remove from each tool's rules directory
+    for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
+      if (!toolPath.rules) continue;
+      const filePath = path.join(home, toolPath.rules, fileName);
+      if (await pathExists(filePath)) {
+        await remove(filePath);
+        removed.push(filePath);
+        log.debug(`Removed rule ${name} from ${tool}`);
+      }
+    }
+
+    // Refresh CLAUDE.md references
+    await this.pullAllRules(teamConfig, localConfig);
+
+    return removed;
   }
 
   /**

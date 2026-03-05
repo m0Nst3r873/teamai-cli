@@ -121,4 +121,9 @@ export class InstinctsHandler extends ResourceHandler {
       log.warn(`Failed to import instinct ${item.name}: ${(e as Error).message}`);
     }
   }
+
+  async removeItem(_name: string, _teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<string[]> {
+    log.warn('Removing instincts is not supported');
+    return [];
+  }
 }

@@ -41,4 +41,9 @@ export class DocsHandler extends ResourceHandler {
       log.warn(`Failed to sync docs: ${(e as Error).message}`);
     }
   }
+
+  async removeItem(_name: string, _teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<string[]> {
+    log.warn('Removing docs is not supported via remove command. Delete from team repo directly.');
+    return [];
+  }
 }
