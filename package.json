@@ -1,6 +1,6 @@
 {
   "name": "@tencent/teamai-cli",
-  "version": "0.1.9",
+  "version": "0.1.11",
   "description": "Team AI DevKit — 团队 AI 经验共享框架",
   "type": "module",
   "bin": {
@@ -8,7 +8,8 @@
   },
   "files": [
     "dist",
-    "README.md"
+    "README.md",
+    "CHANGELOG.md"
   ],
   "publishConfig": {
     "access": "public",
