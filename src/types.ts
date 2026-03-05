@@ -74,6 +74,7 @@ export const StateSchema = z.object({
   lastPush: z.string().nullable().default(null),
   lastPull: z.string().nullable().default(null),
   pushedInstincts: z.array(z.string()).default([]),
+  pushedRules: z.array(z.string()).default([]),
   pushedSkills: z.array(z.string()).default([]),
 });
 

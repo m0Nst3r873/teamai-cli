@@ -1,16 +1,63 @@
 import path from 'node:path';
 import { ResourceHandler } from './base.js';
 import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
-import { listFiles, pathExists, readFileSafe, writeFile } from '../utils/fs.js';
+import { listFiles, pathExists, readFileSafe, writeFile, copyFile } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 import { TEAMAI_RULES_START, TEAMAI_RULES_END } from '../types.js';
 
 export class RulesHandler extends ResourceHandler {
   readonly type = 'rules' as const;
 
-  async scanLocalForPush(_teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<ResourceItem[]> {
-    // Rules are typically created directly in the team repo, not pushed from local
-    return [];
+  /**
+   * Scan for local rule .md files that are not yet in the team repo.
+   * Looks in each tool's CLAUDE.md sibling `rules/` directory (e.g. ~/.claude/rules/).
+   */
+  async scanLocalForPush(teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
+    const teamRulesDir = path.join(localConfig.repo.localPath, 'rules');
+    const teamRules = new Set(
+      (await pathExists(teamRulesDir))
+        ? (await listFiles(teamRulesDir)).filter((f) => f.endsWith('.md'))
+        : [],
+    );
+
+    const items: ResourceItem[] = [];
+    const seen = new Set<string>();
+
+    // Scan each tool's directory for a sibling `rules/` folder
+    for (const [_tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
+      if (!toolPath.claudemd) continue;
+      const toolDir = path.join(process.env.HOME ?? '', path.dirname(toolPath.claudemd));
+      const rulesDir = path.join(toolDir, 'rules');
+      if (!await pathExists(rulesDir)) continue;
+
+      const files = await listFiles(rulesDir);
+      for (const file of files) {
+        if (!file.endsWith('.md')) continue;
+        if (seen.has(file) || teamRules.has(file)) continue;
+
+        seen.add(file);
+        items.push({
+          name: file.replace(/\.md$/, ''),
+          type: 'rules',
+          sourcePath: path.join(rulesDir, file),
+          relativePath: `rules/${file}`,
+        });
+      }
+    }
+
+    // Also scan the team repo rules/ dir for untracked files (created directly)
+    if (await pathExists(teamRulesDir)) {
+      const repoFiles = await listFiles(teamRulesDir);
+      for (const file of repoFiles) {
+        if (!file.endsWith('.md')) continue;
+        if (seen.has(file)) continue;
+        // Check if this file is untracked by git (new, not yet committed)
+        // We include all files here; pushRepo will handle the git add/commit
+        seen.add(file);
+      }
+    }
+
+    return items;
   }
 
   async scanTeamForPull(_teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
@@ -28,8 +75,12 @@ export class RulesHandler extends ResourceHandler {
       }));
   }
 
-  async pushItem(_item: ResourceItem, _teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
-    // No-op: rules are managed directly in team repo
+  async pushItem(item: ResourceItem, _teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<void> {
+    const dest = path.join(localConfig.repo.localPath, 'rules', `${item.name}.md`);
+    if (item.sourcePath !== dest) {
+      await copyFile(item.sourcePath, dest);
+    }
+    log.debug(`Copied rule ${item.name} → team repo`);
   }
 
   /**

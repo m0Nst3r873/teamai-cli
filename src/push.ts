@@ -21,7 +21,7 @@ export async function push(options: GlobalOptions & { all?: boolean }): Promise<
   const spin = spinner('Scanning local resources...').start();
 
   // Scan for pushable resources
-  const pushableTypes: ResourceType[] = ['skills', 'instincts'];
+  const pushableTypes: ResourceType[] = ['skills', 'rules', 'instincts'];
   const allItems: ResourceItem[] = [];
 
   for (const type of pushableTypes) {
@@ -76,7 +76,7 @@ export async function push(options: GlobalOptions & { all?: boolean }): Promise<
   // Git commit and push
   try {
     // Add all files under the resource directories
-    const gitFiles = ['skills/', 'instincts/'];
+    const gitFiles = ['skills/', 'rules/', 'instincts/'];
     await pushRepo(
       localConfig.repo.localPath,
       `[teamai] Push ${allItems.length} resource(s) from ${localConfig.username}`,
@@ -97,6 +97,9 @@ export async function push(options: GlobalOptions & { all?: boolean }): Promise<
     }
     if (item.type === 'instincts' && !state.pushedInstincts.includes(item.name)) {
       state.pushedInstincts.push(item.name);
+    }
+    if (item.type === 'rules' && !state.pushedRules.includes(item.name)) {
+      state.pushedRules.push(item.name);
     }
   }
   await saveState(state);
