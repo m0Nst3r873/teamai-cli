@@ -86,3 +86,90 @@ export async function verifyToken(): Promise<TGitUser> {
     throw new Error(`TGit token verification failed: ${(e as Error).message}`);
   }
 }
+
+// ─── Repo / Project APIs ─────────────────────────────────
+
+export interface TGitProject {
+  id: number;
+  name: string;
+  path_with_namespace: string;
+  http_url_to_repo: string;
+  ssh_url_to_repo: string;
+  default_branch: string;
+}
+
+/**
+ * Get project info by URL-encoded projectId (e.g. "owner%2Frepo").
+ * Returns null if the project does not exist (404).
+ */
+export async function getProject(projectId: string): Promise<TGitProject | null> {
+  const token = getToken();
+  const url = `${TGIT_API_BASE}/projects/${projectId}?private_token=${token}`;
+  log.debug(`TGit API: GET /projects/${projectId}`);
+  const resp = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+  });
+  if (resp.status === 404) return null;
+  if (!resp.ok) {
+    const body = await resp.text().catch(() => '');
+    throw new Error(`TGit API error ${resp.status}: ${body}`);
+  }
+  return resp.json() as Promise<TGitProject>;
+}
+
+/**
+ * Check whether a repo has any files (i.e. is non-empty).
+ * Returns true if the repo is empty (no tree entries or 404 on tree).
+ */
+export async function isRepoEmpty(projectId: string): Promise<boolean> {
+  const token = getToken();
+  const url = `${TGIT_API_BASE}/projects/${projectId}/repository/tree?private_token=${token}`;
+  log.debug(`TGit API: GET /projects/${projectId}/repository/tree`);
+  const resp = await fetch(url, {
+    headers: { 'Content-Type': 'application/json' },
+  });
+  // 404 means no default branch / empty repo
+  if (resp.status === 404) return true;
+  if (!resp.ok) return true;
+  const tree = (await resp.json()) as unknown[];
+  return tree.length === 0;
+}
+
+export interface TGitNamespace {
+  id: number;
+  name: string;
+  path: string;
+  kind: string;
+}
+
+/**
+ * Look up a namespace (user or group) by name.
+ * Returns the namespace ID or null if not found.
+ */
+export async function getNamespaceId(name: string): Promise<number | null> {
+  const resp = await tgitFetch(`/namespaces?search=${encodeURIComponent(name)}`);
+  const namespaces = (await resp.json()) as TGitNamespace[];
+  const match = namespaces.find(
+    (ns) => ns.path.toLowerCase() === name.toLowerCase(),
+  );
+  return match?.id ?? null;
+}
+
+/**
+ * Create a new project under the given namespace.
+ * If namespaceId is omitted, the project is created under the current user.
+ */
+export async function createProject(
+  name: string,
+  namespaceId?: number,
+): Promise<TGitProject> {
+  const body: Record<string, unknown> = { name };
+  if (namespaceId != null) {
+    body.namespace_id = namespaceId;
+  }
+  const resp = await tgitFetch('/projects', {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+  return resp.json() as Promise<TGitProject>;
+}

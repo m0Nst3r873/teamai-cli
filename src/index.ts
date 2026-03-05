@@ -7,7 +7,7 @@ const program = new Command();
 program
   .name('teamai')
   .description('Team AI DevKit — 团队 AI 经验共享框架')
-  .version('0.1.0')
+  .version('0.1.3')
   .option('--dry-run', 'Preview mode, no changes made')
   .option('-v, --verbose', 'Verbose output')
   .hook('preAction', (thisCommand) => {
@@ -18,7 +18,7 @@ program
 program
   .command('init')
   .description('Initialize teamai (configure TGit, clone repo, register member)')
-  .option('--repo <url>', 'Team repo URL')
+  .option('--repo <repo>', 'Team repo (owner/repo or full URL)')
   .action(async (cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;
     const { init } = await import('./init.js');

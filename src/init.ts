@@ -5,7 +5,8 @@ import { saveLocalConfig, loadTeamConfig } from './config.js';
 import { injectHooksToAllTools } from './hooks.js';
 import { cloneRepo } from './utils/git.js';
 import { pushRepo } from './utils/git.js';
-import { verifyToken, getCurrentUser } from './utils/tgit-api.js';
+import { verifyToken, getCurrentUser, getProject, isRepoEmpty, createProject, getNamespaceId } from './utils/tgit-api.js';
+import { parseRepoInput, type RepoInfo } from './utils/repo-url.js';
 import { ensureDir, writeFile, pathExists, expandHome } from './utils/fs.js';
 import { log, spinner } from './utils/logger.js';
 import { TEAMAI_HOME, type GlobalOptions, type LocalConfig } from './types.js';
@@ -18,6 +19,47 @@ function askQuestion(prompt: string): Promise<string> {
       resolve(answer.trim());
     });
   });
+}
+
+async function resolveRepo(info: RepoInfo): Promise<string> {
+  const spin = spinner(`Checking repo ${info.owner}/${info.repo}...`).start();
+
+  const project = await getProject(info.projectId);
+
+  if (!project) {
+    // Repo does not exist — ask to create
+    spin.info(`Repo ${info.owner}/${info.repo} does not exist on TGit`);
+    const answer = await askQuestion(`Create repo ${info.owner}/${info.repo}? [Y/n] `);
+    if (answer && answer.toLowerCase() !== 'y') {
+      log.error('Aborted. Please provide an existing repo or confirm creation.');
+      process.exit(1);
+    }
+
+    const createSpin = spinner(`Creating repo ${info.owner}/${info.repo}...`).start();
+    try {
+      const namespaceId = await getNamespaceId(info.owner);
+      await createProject(info.repo, namespaceId ?? undefined);
+      createSpin.succeed(`Repo ${info.owner}/${info.repo} created`);
+    } catch (e) {
+      createSpin.fail(`Failed to create repo: ${(e as Error).message}`);
+      process.exit(1);
+    }
+  } else {
+    // Repo exists — check if empty
+    const empty = await isRepoEmpty(info.projectId);
+    if (empty) {
+      spin.succeed(`Repo ${info.owner}/${info.repo} exists (empty, ready to use)`);
+    } else {
+      spin.warn(`Repo ${info.owner}/${info.repo} exists and is non-empty`);
+      const answer = await askQuestion('Continue using this repo? [Y/n] ');
+      if (answer && answer.toLowerCase() !== 'y') {
+        log.error('Aborted.');
+        process.exit(1);
+      }
+    }
+  }
+
+  return info.httpsUrl;
 }
 
 export async function init(options: GlobalOptions & { repo?: string }): Promise<void> {
@@ -38,15 +80,25 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
     process.exit(1);
   }
 
-  // Step 2: Get repo URL
-  let repoUrl = options.repo ?? '';
-  if (!repoUrl) {
-    repoUrl = await askQuestion('Team repo URL (e.g. git@git.woa.com:team/teamai-team.git): ');
+  // Step 2: Resolve repo
+  let repoInput = options.repo ?? '';
+  if (!repoInput) {
+    repoInput = await askQuestion('Team repo (e.g. yourteam/yourproject): ');
   }
-  if (!repoUrl) {
-    log.error('Repo URL is required');
+  if (!repoInput) {
+    log.error('Repo is required');
     process.exit(1);
   }
+
+  let repoInfo: RepoInfo;
+  try {
+    repoInfo = parseRepoInput(repoInput);
+  } catch (e) {
+    log.error((e as Error).message);
+    process.exit(1);
+  }
+
+  const repoUrl = await resolveRepo(repoInfo);
 
   // Step 3: Clone or link repo
   const defaultLocalPath = path.join(process.env.HOME ?? '', '.teamai', 'team-repo');

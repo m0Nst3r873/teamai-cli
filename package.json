@@ -1,10 +1,18 @@
 {
-  "name": "teamai-cli",
-  "version": "0.1.0",
+  "name": "@tencent/teamai-cli",
+  "version": "0.1.3",
   "description": "Team AI DevKit — 团队 AI 经验共享框架",
   "type": "module",
   "bin": {
     "teamai": "./dist/index.js"
+  },
+  "files": [
+    "dist",
+    "README.md"
+  ],
+  "publishConfig": {
+    "access": "public",
+    "registry": "http://r.tnpm.oa.com"
   },
   "scripts": {
     "build": "tsup",
@@ -14,7 +22,7 @@
   },
   "repository": {
     "type": "git",
-    "url": "git@git.woa.com:jeffyxu/teamai-cli.git"
+    "url": "https://git.woa.com/teamai/teamai-cli.git"
   },
   "keywords": ["ai", "team", "devkit", "skills", "sharing"],
   "author": "jeffyxu",

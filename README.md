@@ -5,10 +5,18 @@
 ## 安装
 
 ```bash
-# 一行安装
-git clone git@git.woa.com:jeffyxu/teamai-cli.git ~/.teamai/teamai-cli \
+npm install -g @tencent/teamai-cli --registry=http://r.tnpm.oa.com
+```
+
+<details>
+<summary>从源码安装</summary>
+
+```bash
+git clone https://git.woa.com/teamai/teamai-cli.git ~/.teamai/teamai-cli \
   && cd ~/.teamai/teamai-cli && npm install && npm run build && npm link
 ```
+
+</details>
 
 ## 前置条件
 
@@ -26,7 +34,7 @@ echo 'export TGIT_TOKEN=your_token_here' >> ~/.zshrc && source ~/.zshrc
 
 ```bash
 # 1. 初始化（关联团队仓库、注册成员、注入 hooks）
-teamai init --repo git@git.woa.com:jeffyxu/teamai-team.git
+teamai init --repo yourteam/yourproject
 
 # 2. 拉取团队资源
 teamai pull
@@ -78,5 +86,9 @@ teamai status
 ## 更新
 
 ```bash
+# tnpm 安装的用户
+npm update -g @tencent/teamai-cli --registry=http://r.tnpm.oa.com
+
+# 源码安装的用户
 cd ~/.teamai/teamai-cli && git pull && npm install && npm run build
 ```
