@@ -1,9 +1,10 @@
 import path from 'node:path';
+import YAML from 'yaml';
 import { requireInit, loadState } from './config.js';
 import { getRepoStatus } from './utils/git.js';
 import { log } from './utils/logger.js';
 import { getAllHandlers } from './resources/index.js';
-import { listDirs, listFiles, pathExists } from './utils/fs.js';
+import { listDirs, listFiles, pathExists, readFileSafe } from './utils/fs.js';
 import type { GlobalOptions, ResourceType } from './types.js';
 
 export async function status(options: GlobalOptions): Promise<void> {
@@ -70,6 +71,22 @@ export async function status(options: GlobalOptions): Promise<void> {
   const hooksYaml = await pathExists(path.join(repoPath, 'hooks', 'hooks.yaml'));
   counts.hooks = hooksYaml ? 1 : 0;
 
+  // Env
+  const envYamlPath = path.join(repoPath, 'env', 'env.yaml');
+  let envCount = 0;
+  if (await pathExists(envYamlPath)) {
+    const envContent = await readFileSafe(envYamlPath);
+    if (envContent) {
+      try {
+        const envData = YAML.parse(envContent) as { variables?: unknown[] };
+        envCount = Array.isArray(envData?.variables) ? envData.variables.length : 0;
+      } catch {
+        // invalid yaml
+      }
+    }
+  }
+  counts.env = envCount;
+
   for (const [type, count] of Object.entries(counts)) {
     console.log(`  ${type}: ${count}`);
   }
@@ -103,11 +120,41 @@ export async function list(type: string | undefined, options: GlobalOptions): Pr
 
   const types: ResourceType[] = type
     ? [type as ResourceType]
-    : ['skills', 'rules', 'hooks', 'docs', 'instincts'];
+    : ['skills', 'rules', 'hooks', 'docs', 'instincts', 'env'];
 
   for (const t of types) {
     console.log('');
     console.log(`=== ${t.toUpperCase()} ===`);
+
+    if (t === 'env') {
+      // Special handling: show individual variables from env.yaml
+      const envYamlPath = path.join(repoPath, 'env', 'env.yaml');
+      if (await pathExists(envYamlPath)) {
+        const envContent = await readFileSafe(envYamlPath);
+        if (envContent) {
+          try {
+            const envData = YAML.parse(envContent) as { variables?: Array<{ key: string; value: string; description?: string }> };
+            if (envData?.variables && envData.variables.length > 0) {
+              for (const v of envData.variables) {
+                console.log(`  ${v.key}=${v.value}`);
+                if (options.verbose && v.description) {
+                  console.log(`    ${v.description}`);
+                }
+              }
+            } else {
+              console.log('  (none)');
+            }
+          } catch {
+            console.log('  (invalid env.yaml)');
+          }
+        } else {
+          console.log('  (none)');
+        }
+      } else {
+        console.log('  (none)');
+      }
+      continue;
+    }
 
     const handler = getAllHandlers().find((h) => h.type === t);
     if (!handler) continue;

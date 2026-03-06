@@ -70,7 +70,7 @@ program
 
 program
   .command('list [type]')
-  .description('List resources (skills|rules|hooks|docs|instincts)')
+  .description('List resources (skills|rules|hooks|docs|instincts|env)')
   .action(async (type) => {
     const globalOpts = program.opts() as GlobalOptions;
     const { list } = await import('./status.js');
@@ -112,6 +112,44 @@ program
     const globalOpts = program.opts() as GlobalOptions;
     const { doctor } = await import('./doctor.js');
     await doctor(globalOpts);
+  });
+
+const envCmd = program
+  .command('env')
+  .description('Manage team environment variables')
+  .action(async () => {
+    // Default action: list env vars (backward compatible)
+    const globalOpts = program.opts() as GlobalOptions;
+    const { envList } = await import('./env-commands.js');
+    await envList(globalOpts);
+  });
+
+envCmd
+  .command('list')
+  .description('List team environment variables')
+  .action(async () => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { envList } = await import('./env-commands.js');
+    await envList(globalOpts);
+  });
+
+envCmd
+  .command('add <key> <value>')
+  .description('Add or update a team environment variable')
+  .option('-d, --description <desc>', 'Description for the variable')
+  .action(async (key, value, cmdOpts) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { envAdd } = await import('./env-commands.js');
+    await envAdd(key, value, { ...globalOpts, ...cmdOpts });
+  });
+
+envCmd
+  .command('remove <key>')
+  .description('Remove a team environment variable')
+  .action(async (key) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { envRemove } = await import('./env-commands.js');
+    await envRemove(key, globalOpts);
   });
 
 program.parse();

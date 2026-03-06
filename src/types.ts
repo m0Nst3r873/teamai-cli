@@ -21,6 +21,10 @@ export const SharingConfigSchema = z.object({
   docs: z.object({
     localDir: z.string().default('~/.teamai/docs'),
   }).default({}),
+  env: z.object({
+    injectShellProfile: z.boolean().default(true),
+    shellProfilePath: z.string().optional(),
+  }).default({}),
 });
 
 export const TeamaiConfigSchema = z.object({
@@ -70,13 +74,14 @@ export const StateSchema = z.object({
   pushedInstincts: z.array(z.string()).default([]),
   pushedRules: z.array(z.string()).default([]),
   pushedSkills: z.array(z.string()).default([]),
+  pushedEnvVars: z.array(z.string()).default([]),
 });
 
 export type State = z.infer<typeof StateSchema>;
 
 // ─── Resource types ─────────────────────────────────────
 
-export type ResourceType = 'skills' | 'rules' | 'hooks' | 'docs' | 'instincts';
+export type ResourceType = 'skills' | 'rules' | 'hooks' | 'docs' | 'instincts' | 'env';
 
 export interface ResourceItem {
   name: string;
@@ -106,9 +111,12 @@ export const TEAMAI_CONFIG_PATH = `${TEAMAI_HOME}/config.yaml`;
 export const TEAMAI_STATE_PATH = `${TEAMAI_HOME}/state.json`;
 export const TEAMAI_TOKEN_PATH = `${TEAMAI_HOME}/token`;
 
-export const RESOURCE_TYPES: ResourceType[] = ['skills', 'rules', 'hooks', 'docs', 'instincts'];
+export const RESOURCE_TYPES: ResourceType[] = ['skills', 'rules', 'hooks', 'docs', 'instincts', 'env'];
 
 export const TEAMAI_RULES_START = '<!-- [teamai:rules:start] -->';
 export const TEAMAI_RULES_END = '<!-- [teamai:rules:end] -->';
 
 export const TEAMAI_HOOK_DESCRIPTION_PREFIX = '[teamai]';
+
+export const TEAMAI_ENV_START = '# [teamai:env:start]';
+export const TEAMAI_ENV_END = '# [teamai:env:end]';

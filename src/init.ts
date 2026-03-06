@@ -147,12 +147,13 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
         skills: { syncTargets: ['claude', 'codex', 'claude-internal', 'cursor', 'codebuddy'] },
         rules: { enforced: [] },
         docs: { localDir: '~/.teamai/docs' },
+        env: { injectShellProfile: true },
       },
     });
     await writeFile(path.join(localPath, 'teamai.yaml'), defaultConfig);
 
     // Create standard directories
-    for (const dir of ['members', 'skills', 'rules', 'docs', 'hooks', 'hooks/scripts', 'instincts']) {
+    for (const dir of ['members', 'skills', 'rules', 'docs', 'hooks', 'hooks/scripts', 'instincts', 'env']) {
       await ensureDir(path.join(localPath, dir));
       // create .gitkeep in empty dirs
       const gitkeep = path.join(localPath, dir, '.gitkeep');
@@ -185,6 +186,7 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
           'hooks/.gitkeep',
           'hooks/scripts/.gitkeep',
           'instincts/.gitkeep',
+          'env/.gitkeep',
         ]);
         log.success('Member registration pushed to team repo');
       } catch (e) {
