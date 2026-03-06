@@ -3,7 +3,7 @@ import { readJson, writeJson, expandHome, ensureDir } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import { TEAMAI_HOOK_DESCRIPTION_PREFIX } from './types.js';
 
-const TEAMAI_PULL_COMMAND = 'bash -lc "teamai pull --silent" 2>/dev/null || true';
+const TEAMAI_PULL_COMMAND = 'bash -lc "teamai pull" 2>/dev/null || true';
 
 // ─── Claude Code / Claude Internal format (settings.json) ───
 
@@ -74,7 +74,15 @@ async function injectClaudeHooks(settingsPath: string): Promise<void> {
     (h) => h.description?.startsWith(TEAMAI_HOOK_DESCRIPTION_PREFIX)
   );
   if (existing) {
-    log.debug(`teamai hook already exists in ${settingsPath}`);
+    // Update command if it changed (e.g. --silent removed)
+    const currentCmd = existing.hooks?.[0]?.command;
+    if (currentCmd !== TEAMAI_PULL_COMMAND) {
+      existing.hooks = CLAUDE_SESSION_START_HOOK.hooks;
+      await writeJson(expanded, settings);
+      log.success(`Updated teamai hook in ${settingsPath}`);
+    } else {
+      log.debug(`teamai hook already exists in ${settingsPath}`);
+    }
     return;
   }
 
@@ -125,12 +133,19 @@ async function injectCursorHooks(hooksPath: string): Promise<void> {
     hooksJson.hooks.sessionStart = [];
   }
 
-  // Check if teamai hook already exists (match by command)
-  const existing = hooksJson.hooks.sessionStart.find(
-    (h) => h.command === TEAMAI_PULL_COMMAND
+  // Check if teamai hook already exists (match by command prefix)
+  const existingIdx = hooksJson.hooks.sessionStart.findIndex(
+    (h) => h.command.includes('teamai pull')
   );
-  if (existing) {
-    log.debug(`teamai hook already exists in ${hooksPath}`);
+  if (existingIdx >= 0) {
+    const existing = hooksJson.hooks.sessionStart[existingIdx];
+    if (existing.command !== TEAMAI_PULL_COMMAND) {
+      hooksJson.hooks.sessionStart[existingIdx] = CURSOR_SESSION_START_HOOK;
+      await writeJson(expanded, hooksJson);
+      log.success(`Updated teamai hook in ${hooksPath}`);
+    } else {
+      log.debug(`teamai hook already exists in ${hooksPath}`);
+    }
     return;
   }
 

@@ -2,7 +2,7 @@ import path from 'node:path';
 import fse from 'fs-extra';
 import { ResourceHandler } from './base.js';
 import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
-import { pathExists, copyDir, expandHome } from '../utils/fs.js';
+import { pathExists, expandHome, listFiles } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 
 export class DocsHandler extends ResourceHandler {
@@ -16,6 +16,11 @@ export class DocsHandler extends ResourceHandler {
   async scanTeamForPull(_teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
     const docsDir = path.join(localConfig.repo.localPath, 'docs');
     if (!await pathExists(docsDir)) return [];
+
+    // Check if there are actual doc files (ignore .gitkeep and other dot files)
+    const files = await listFiles(docsDir);
+    const realFiles = files.filter(f => !f.startsWith('.'));
+    if (realFiles.length === 0) return [];
 
     return [{
       name: 'docs',
@@ -35,7 +40,11 @@ export class DocsHandler extends ResourceHandler {
   async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
     const localDocsDir = expandHome(teamConfig.sharing.docs.localDir);
     try {
-      await copyDir(item.sourcePath, localDocsDir);
+      const src = expandHome(item.sourcePath);
+      await fse.copy(src, localDocsDir, {
+        overwrite: true,
+        filter: (srcPath: string) => !path.basename(srcPath).startsWith('.'),
+      });
       log.debug(`Synced docs → ${localDocsDir}`);
     } catch (e) {
       log.warn(`Failed to sync docs: ${(e as Error).message}`);

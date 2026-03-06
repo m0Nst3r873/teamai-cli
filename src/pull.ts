@@ -2,9 +2,85 @@ import path from 'node:path';
 import { requireInit, loadState, saveState } from './config.js';
 import { pullRepo } from './utils/git.js';
 import { log, spinner } from './utils/logger.js';
-import { pathExists, remove } from './utils/fs.js';
-import { getHandler, RulesHandler } from './resources/index.js';
-import type { GlobalOptions, ResourceType } from './types.js';
+import { pathExists, remove, listFiles } from './utils/fs.js';
+import { getHandler, RulesHandler, HooksConfigHandler } from './resources/index.js';
+import type { GlobalOptions, ResourceType, ResourceItem, TeamaiConfig } from './types.js';
+
+/**
+ * Collect names of resources that already exist locally (before pull).
+ * Used to distinguish "new" vs "updated" items in pull output.
+ */
+async function getExistingLocalNames(
+  type: ResourceType,
+  items: ResourceItem[],
+  teamConfig: TeamaiConfig,
+): Promise<Set<string>> {
+  const existing = new Set<string>();
+  const home = process.env.HOME ?? '';
+
+  if (type === 'skills') {
+    // Check the first syncTarget's skills directory
+    const syncTargets = teamConfig.sharing.skills.syncTargets;
+    for (const tool of syncTargets) {
+      const toolPath = teamConfig.toolPaths[tool];
+      if (!toolPath) continue;
+      const skillsDir = path.join(home, toolPath.skills);
+      for (const item of items) {
+        const skillDir = path.join(skillsDir, item.name);
+        if (await pathExists(skillDir)) {
+          existing.add(item.name);
+        }
+      }
+      // Only need to check the first available target
+      break;
+    }
+  } else if (type === 'instincts') {
+    // Check ~/.claude/homunculus/instincts/inherited/
+    const inheritedDir = path.join(home, '.claude/homunculus/instincts/inherited');
+    if (await pathExists(inheritedDir)) {
+      const files = await listFiles(inheritedDir);
+      const fileNames = new Set(files.map(f => f.replace(/\.(yaml|yml|md)$/, '')));
+      for (const item of items) {
+        // item.name is like "member/instinct-name", the local file is just the basename
+        const basename = path.basename(item.sourcePath).replace(/\.(yaml|yml|md)$/, '');
+        if (fileNames.has(basename)) {
+          existing.add(item.name);
+        }
+      }
+    }
+  }
+  // docs and hooks are single-item, no need for new/updated distinction
+
+  return existing;
+}
+
+/**
+ * Format pull detail output showing new vs updated items.
+ */
+function logSyncDetail(
+  type: ResourceType,
+  items: ResourceItem[],
+  existingNames: Set<string>,
+  verbose: boolean,
+): void {
+  const added = items.filter(i => !existingNames.has(i.name));
+  const updated = items.filter(i => existingNames.has(i.name));
+
+  if (added.length === 0 && updated.length > 0) {
+    log.success(`Synced ${items.length} ${type} (all updated)`);
+  } else if (added.length > 0) {
+    log.success(`Synced ${items.length} ${type} (${added.length} new, ${updated.length} updated)`);
+    const addedNames = added.map(i => i.name);
+    log.dim(`    new: ${addedNames.join(', ')}`);
+  } else {
+    log.success(`Synced ${items.length} ${type}`);
+  }
+
+  if (verbose && updated.length > 0) {
+    const updatedNames = updated.map(i => i.name);
+    log.dim(`    updated: ${updatedNames.join(', ')}`);
+  }
+}
 
 export async function pull(options: GlobalOptions): Promise<void> {
   const { localConfig, teamConfig } = await requireInit();
@@ -48,16 +124,42 @@ export async function pull(options: GlobalOptions): Promise<void> {
     const items = await handler.scanTeamForPull(freshConfig, localConfig);
     if (items.length === 0) continue;
 
+    // Collect existing local resource names before pulling
+    const existingNames = await getExistingLocalNames(type, items, freshConfig);
+
     if (options.dryRun) {
-      log.info(`[dry-run] Would pull ${items.length} ${type}`);
-      for (const item of items) {
-        log.dim(`  ${item.name}`);
+      const added = items.filter(i => !existingNames.has(i.name));
+      const updated = items.filter(i => existingNames.has(i.name));
+
+      if (type === 'hooks') {
+        const hooksHandler = handler as HooksConfigHandler;
+        const entryCount = await hooksHandler.countHookEntries(items[0].sourcePath);
+        log.info(`[dry-run] Would sync ${entryCount} hook entries`);
+      } else if (added.length > 0 && (type === 'skills' || type === 'instincts')) {
+        log.info(`[dry-run] Would pull ${items.length} ${type} (${added.length} new, ${updated.length} updated)`);
+        log.dim(`    new: ${added.map(i => i.name).join(', ')}`);
+      } else {
+        log.info(`[dry-run] Would pull ${items.length} ${type}`);
+      }
+      if (options.verbose) {
+        for (const item of items) {
+          log.dim(`  ${item.name}`);
+        }
       }
     } else {
       for (const item of items) {
         await handler.pullItem(item, freshConfig, localConfig);
       }
-      log.success(`Synced ${items.length} ${type}`);
+
+      if (type === 'hooks') {
+        const hooksHandler = handler as HooksConfigHandler;
+        const entryCount = await hooksHandler.countHookEntries(items[0].sourcePath);
+        log.success(`Synced ${entryCount} hook entries`);
+      } else if (type === 'skills' || type === 'instincts') {
+        logSyncDetail(type, items, existingNames, !!options.verbose);
+      } else {
+        log.success(`Synced ${items.length} ${type}`);
+      }
     }
 
     totalSynced += items.length;

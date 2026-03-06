@@ -109,6 +109,26 @@ export class HooksConfigHandler extends ResourceHandler {
     }
   }
 
+  /**
+   * Count the number of hook entries defined in a hooks.yaml file.
+   */
+  async countHookEntries(sourcePath: string): Promise<number> {
+    const content = await readFileSafe(sourcePath);
+    if (!content) return 0;
+
+    try {
+      const hooksConfig = YAML.parse(content) as HooksYaml;
+      if (!hooksConfig?.hooks) return 0;
+      let count = 0;
+      for (const matchers of Object.values(hooksConfig.hooks)) {
+        count += matchers.length;
+      }
+      return count;
+    } catch {
+      return 0;
+    }
+  }
+
   async removeItem(_name: string, _teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<string[]> {
     log.warn('Removing hooks is not supported via remove command. Edit hooks/hooks.yaml directly.');
     return [];
