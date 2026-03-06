@@ -64,6 +64,7 @@ describe('pull tombstone cleanup', () => {
         skills: { syncTargets: ['claude', 'codex'] },
         rules: { enforced: [] },
         docs: { localDir: '' },
+        env: { injectShellProfile: true },
       },
       toolPaths: {
         claude: { skills: '.claude/skills', rules: '.claude/rules' },

@@ -3,7 +3,7 @@ import { loadLocalConfig, loadTeamConfig } from './config.js';
 import { pathExists, readFileSafe } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import type { GlobalOptions } from './types.js';
-import { TeamaiConfigSchema, type TeamaiConfig } from './types.js';
+import { TeamaiConfigSchema, TEAMAI_ENV_START, type TeamaiConfig } from './types.js';
 
 interface Check {
   name: string;
@@ -70,6 +70,20 @@ export async function doctor(options: GlobalOptions): Promise<void> {
       fix: 'Check teamai.yaml in team repo for syntax errors',
     },
     ...buildHookChecks(toolPaths),
+    {
+      name: 'Env variables injected in shell profile',
+      check: async () => {
+        const home = process.env.HOME ?? '';
+        const shell = process.env.SHELL ?? '';
+        const profilePath = shell.includes('zsh')
+          ? path.join(home, '.zshrc')
+          : path.join(home, '.bashrc');
+        if (!await pathExists(profilePath)) return false;
+        const content = await readFileSafe(profilePath);
+        return content?.includes(TEAMAI_ENV_START) ?? false;
+      },
+      fix: 'Run `teamai pull` to inject env variables into shell profile',
+    },
   ];
 
   let allPassed = true;

@@ -3,7 +3,7 @@ import { requireInit, loadState, saveState } from './config.js';
 import { pullRepo } from './utils/git.js';
 import { log, spinner } from './utils/logger.js';
 import { pathExists, remove, listFiles } from './utils/fs.js';
-import { getHandler, RulesHandler, HooksConfigHandler } from './resources/index.js';
+import { getHandler, RulesHandler, HooksConfigHandler, EnvHandler } from './resources/index.js';
 import type { GlobalOptions, ResourceType, ResourceItem, TeamaiConfig } from './types.js';
 
 /**
@@ -99,7 +99,7 @@ export async function pull(options: GlobalOptions): Promise<void> {
   const { teamConfig: freshConfig } = await requireInit();
 
   // Step 2: Sync each resource type
-  const resourceTypes: ResourceType[] = ['skills', 'rules', 'hooks', 'docs', 'instincts'];
+  const resourceTypes: ResourceType[] = ['skills', 'rules', 'hooks', 'docs', 'instincts', 'env'];
   let totalSynced = 0;
 
   for (const type of resourceTypes) {
@@ -123,6 +123,22 @@ export async function pull(options: GlobalOptions): Promise<void> {
 
     const items = await handler.scanTeamForPull(freshConfig, localConfig);
     if (items.length === 0) continue;
+
+    // Env uses special handling (similar to hooks)
+    if (type === 'env') {
+      const envHandler = handler as EnvHandler;
+      const varCount = await envHandler.countEnvVars(items[0].sourcePath);
+      if (varCount === 0) continue;
+
+      if (options.dryRun) {
+        log.info(`[dry-run] Would sync ${varCount} env variable(s) to shell profile`);
+      } else {
+        await envHandler.pullItem(items[0], freshConfig, localConfig);
+        log.success(`Synced ${varCount} env variable(s) to shell profile`);
+      }
+      totalSynced += 1;
+      continue;
+    }
 
     // Collect existing local resource names before pulling
     const existingNames = await getExistingLocalNames(type, items, freshConfig);

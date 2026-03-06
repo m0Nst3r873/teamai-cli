@@ -4,6 +4,7 @@ import { InstinctsHandler } from './instincts.js';
 import { RulesHandler } from './rules.js';
 import { HooksConfigHandler } from './hooks-config.js';
 import { DocsHandler } from './docs.js';
+import { EnvHandler } from './env.js';
 import type { ResourceType } from '../types.js';
 
 const handlers: Record<ResourceType, ResourceHandler> = {
@@ -12,6 +13,7 @@ const handlers: Record<ResourceType, ResourceHandler> = {
   rules: new RulesHandler(),
   hooks: new HooksConfigHandler(),
   docs: new DocsHandler(),
+  env: new EnvHandler(),
 };
 
 export function getHandler(type: ResourceType): ResourceHandler {
@@ -22,4 +24,4 @@ export function getAllHandlers(): ResourceHandler[] {
   return Object.values(handlers);
 }
 
-export { SkillsHandler, InstinctsHandler, RulesHandler, HooksConfigHandler, DocsHandler };
+export { SkillsHandler, InstinctsHandler, RulesHandler, HooksConfigHandler, DocsHandler, EnvHandler };

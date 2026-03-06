@@ -2,6 +2,8 @@ import { describe, it, expect } from 'vitest';
 import {
   MemberConfigSchema,
   TeamaiConfigSchema,
+  SharingConfigSchema,
+  StateSchema,
 } from '../types.js';
 
 describe('MemberConfigSchema', () => {
@@ -107,5 +109,48 @@ describe('TeamaiConfigSchema reviewers', () => {
       reviewers: [],
     });
     expect(result.reviewers).toEqual([]);
+  });
+});
+
+describe('SharingConfigSchema env', () => {
+  it('should default env.injectShellProfile to true', () => {
+    const result = SharingConfigSchema.parse({});
+    expect(result.env.injectShellProfile).toBe(true);
+  });
+
+  it('should default shellProfilePath to undefined', () => {
+    const result = SharingConfigSchema.parse({});
+    expect(result.env.shellProfilePath).toBeUndefined();
+  });
+
+  it('should accept explicit env config', () => {
+    const result = SharingConfigSchema.parse({
+      env: { injectShellProfile: false, shellProfilePath: '/custom/.profile' },
+    });
+    expect(result.env.injectShellProfile).toBe(false);
+    expect(result.env.shellProfilePath).toBe('/custom/.profile');
+  });
+
+  it('should be included in TeamaiConfigSchema defaults', () => {
+    const result = TeamaiConfigSchema.parse({
+      team: 'test',
+      repo: 'https://git.woa.com/test/repo.git',
+    });
+    expect(result.sharing.env).toBeDefined();
+    expect(result.sharing.env.injectShellProfile).toBe(true);
+  });
+});
+
+describe('StateSchema pushedEnvVars', () => {
+  it('should default pushedEnvVars to empty array', () => {
+    const result = StateSchema.parse({});
+    expect(result.pushedEnvVars).toEqual([]);
+  });
+
+  it('should accept explicit pushedEnvVars', () => {
+    const result = StateSchema.parse({
+      pushedEnvVars: ['API_URL', 'TOKEN'],
+    });
+    expect(result.pushedEnvVars).toEqual(['API_URL', 'TOKEN']);
   });
 });
