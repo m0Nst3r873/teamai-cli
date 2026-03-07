@@ -1,7 +1,7 @@
 import readline from 'node:readline';
 import { requireInit, loadState, saveState } from './config.js';
 import { pullRepo, pushRepoBranch, generateBranchName } from './utils/git.js';
-import { createMergeRequest, getUserByUsername } from './utils/tgit-api.js';
+import { gfMrCreate } from './utils/gf-cli.js';
 import { parseRepoInput } from './utils/repo-url.js';
 import { log, spinner } from './utils/logger.js';
 import { getHandler } from './resources/index.js';
@@ -104,7 +104,7 @@ export async function push(options: GlobalOptions & { all?: boolean }): Promise<
 
     pushSpin.succeed(`Pushed branch ${branchName}`);
 
-    // Create Merge Request
+    // Create Merge Request via gf CLI
     const mrSpin = spinner('Creating Merge Request...').start();
     try {
       let repoInfo;
@@ -114,32 +114,15 @@ export async function push(options: GlobalOptions & { all?: boolean }): Promise<
         repoInfo = parseRepoInput(localConfig.repo.remote);
       }
 
-      // Resolve reviewer usernames to TGit user IDs
-      const reviewerIds: number[] = [];
-      if (teamConfig.reviewers && teamConfig.reviewers.length > 0) {
-        for (const reviewer of teamConfig.reviewers) {
-          try {
-            const user = await getUserByUsername(reviewer);
-            if (user) {
-              reviewerIds.push(user.id);
-            } else {
-              log.debug(`Reviewer ${reviewer} not found on TGit, skipping`);
-            }
-          } catch {
-            log.debug(`Failed to look up reviewer ${reviewer}, skipping`);
-          }
-        }
-      }
-
-      const mr = await createMergeRequest(
-        repoInfo.projectId,
-        branchName,
-        'master',
-        commitMsg,
-        `Pushed ${allItems.length} resource(s):\n${allItems.map((i) => `- [${i.type}] ${i.name}`).join('\n')}`,
-        reviewerIds.length > 0 ? reviewerIds : undefined,
-      );
-      mrSpin.succeed(`Merge Request created: ${mr.web_url}`);
+      const mrUrl = gfMrCreate({
+        repo: `${repoInfo.owner}/${repoInfo.repo}`,
+        source: branchName,
+        target: 'master',
+        title: commitMsg,
+        description: `Pushed ${allItems.length} resource(s):\n${allItems.map((i) => `- [${i.type}] ${i.name}`).join('\n')}`,
+        reviewers: teamConfig.reviewers?.length ? teamConfig.reviewers : undefined,
+      });
+      mrSpin.succeed(`Merge Request created: ${mrUrl}`);
     } catch (e) {
       mrSpin.fail(`Failed to create MR: ${(e as Error).message}`);
       log.info(`Branch ${branchName} has been pushed. You can create a MR manually.`);

@@ -1,6 +1,6 @@
 {
   "name": "@tencent/teamai-cli",
-  "version": "0.1.14",
+  "version": "0.2.1",
   "description": "Team AI DevKit — 团队 AI 经验共享框架",
   "type": "module",
   "bin": {
@@ -27,7 +27,13 @@
     "type": "git",
     "url": "https://git.woa.com/teamai/teamai-cli.git"
   },
-  "keywords": ["ai", "team", "devkit", "skills", "sharing"],
+  "keywords": [
+    "ai",
+    "team",
+    "devkit",
+    "skills",
+    "sharing"
+  ],
   "author": "jeffyxu",
   "license": "MIT",
   "dependencies": {

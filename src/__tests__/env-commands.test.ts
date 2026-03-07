@@ -15,13 +15,12 @@ vi.mock('../utils/git.js', () => ({
   generateBranchName: vi.fn().mockReturnValue('teamai/push/test/20260305-120000'),
 }));
 
-vi.mock('../utils/tgit-api.js', () => ({
-  createMergeRequest: vi.fn().mockResolvedValue({ web_url: 'https://git.woa.com/mr/1' }),
-  getUserByUsername: vi.fn(),
+vi.mock('../utils/gf-cli.js', () => ({
+  gfMrCreate: vi.fn().mockReturnValue('https://git.woa.com/mr/1'),
 }));
 
 vi.mock('../utils/repo-url.js', () => ({
-  parseRepoInput: vi.fn().mockReturnValue({ projectId: 'test%2Frepo' }),
+  parseRepoInput: vi.fn().mockReturnValue({ owner: 'test', repo: 'repo', projectId: 'test%2Frepo' }),
 }));
 
 vi.mock('../utils/logger.js', () => ({
@@ -46,7 +45,7 @@ vi.mock('../utils/logger.js', () => ({
 import { envList, envAdd, envRemove } from '../env-commands.js';
 import { requireInit } from '../config.js';
 import { pushRepoBranch } from '../utils/git.js';
-import { createMergeRequest } from '../utils/tgit-api.js';
+import { gfMrCreate } from '../utils/gf-cli.js';
 import { log } from '../utils/logger.js';
 import type { TeamaiConfig, LocalConfig } from '../types.js';
 
@@ -85,7 +84,7 @@ describe('env-commands', () => {
 
     vi.mocked(requireInit).mockResolvedValue({ localConfig, teamConfig });
     vi.mocked(pushRepoBranch).mockReset().mockResolvedValue(true);
-    vi.mocked(createMergeRequest).mockReset().mockResolvedValue({ web_url: 'https://git.woa.com/mr/1' } as any);
+    vi.mocked(gfMrCreate).mockReset().mockReturnValue('https://git.woa.com/mr/1');
     vi.mocked(log.info).mockClear();
     vi.mocked(log.error).mockClear();
     vi.mocked(log.dim).mockClear();
@@ -173,7 +172,7 @@ describe('env-commands', () => {
       );
 
       // Verify MR creation
-      expect(createMergeRequest).toHaveBeenCalled();
+      expect(gfMrCreate).toHaveBeenCalled();
     });
 
     it('should add variable with description', async () => {
@@ -231,7 +230,7 @@ describe('env-commands', () => {
 
       await envAdd('NO_CHANGE', 'val', {});
 
-      expect(createMergeRequest).not.toHaveBeenCalled();
+      expect(gfMrCreate).not.toHaveBeenCalled();
     });
   });
 
@@ -265,7 +264,7 @@ describe('env-commands', () => {
         expect.any(String),
       );
 
-      expect(createMergeRequest).toHaveBeenCalled();
+      expect(gfMrCreate).toHaveBeenCalled();
     });
 
     it('should error when env.yaml does not exist', async () => {

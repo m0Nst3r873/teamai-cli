@@ -1,5 +1,34 @@
 # Changelog
 
+## [0.2.1] - 2026-03-07
+
+### Fixed
+- 修复 gf CLI 下载地址错误：改为从 `mirrors.tencent.com` 官方源下载
+- 修复平台架构名称：x64/arm64（之前误用 amd64）
+
+## [0.2.0] - 2026-03-07
+
+### Changed
+- **认证方式改造**：使用工蜂 CLI (`gf`) 替代手动 Private Token 配置
+  - `teamai init` 自动安装 gf CLI 到 `~/.teamai/gf/`（无需 sudo）
+  - 通过 `gf auth login` 交互式 OAuth 登录（支持 iOA、浏览器设备码、手动 Token）
+  - 不再需要手动获取和配置 `TGIT_TOKEN`
+- **Clone 方式改造**：使用 `gf repo clone` 替代 simple-git clone
+  - gf clone 自动将 OAuth token 嵌入 remote URL，后续 git pull/push 无需额外认证
+- **MR 创建改造**：使用 `gf mr create` 替代 TGit v3 REST API
+  - reviewer 直接传 username，不再需要查询 user ID
+  - 影响 `teamai push`、`teamai remove`、`teamai env add/remove`
+
+### Removed
+- 删除 `src/utils/tgit-api.ts`（TGit v3 REST API 客户端）及其测试文件
+- 不再需要 `TGIT_TOKEN` 环境变量
+- 移除手动 token 配置流程（`askSecret`、`openBrowser`、`saveTokenToEnvFile`）
+- 移除 `resolveRepo` 预检查（`getProject`、`isRepoEmpty`、`fileExistsInRepo`）
+
+### Added
+- 新增 `src/utils/gf-cli.ts`：gf CLI 安装、认证、clone、MR 创建的完整封装
+- `teamai doctor` 新增 gf CLI 安装和认证状态检查
+
 ## [0.1.14] - 2026-03-06
 
 ### Added

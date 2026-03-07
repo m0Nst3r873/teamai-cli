@@ -5,11 +5,6 @@ export function createGit(basePath?: string): SimpleGit {
   return simpleGit(basePath ? { baseDir: basePath } : undefined);
 }
 
-export async function cloneRepo(remote: string, localPath: string): Promise<void> {
-  const git = simpleGit();
-  await git.clone(remote, localPath);
-}
-
 const DEFAULT_EMAIL_DOMAIN = 'tencent.com';
 
 /**

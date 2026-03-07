@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { loadLocalConfig, loadTeamConfig } from './config.js';
 import { pathExists, readFileSafe } from './utils/fs.js';
+import { isGfInstalled, gfIsAuthenticated } from './utils/gf-cli.js';
 import { log } from './utils/logger.js';
 import type { GlobalOptions } from './types.js';
 import { TeamaiConfigSchema, TEAMAI_ENV_START, type TeamaiConfig } from './types.js';
@@ -43,9 +44,14 @@ export async function doctor(options: GlobalOptions): Promise<void> {
 
   const checks: Check[] = [
     {
-      name: 'TGIT_TOKEN is set',
-      check: async () => !!process.env.TGIT_TOKEN,
-      fix: 'Set TGIT_TOKEN env var. Get a token from https://git.woa.com/profile/account',
+      name: 'gf CLI is installed',
+      check: async () => isGfInstalled(),
+      fix: 'Run `teamai init` to install gf CLI automatically',
+    },
+    {
+      name: 'gf CLI is authenticated',
+      check: async () => gfIsAuthenticated(),
+      fix: 'Run `teamai init` to authenticate via gf auth login',
     },
     {
       name: 'Local config exists (~/.teamai/config.yaml)',

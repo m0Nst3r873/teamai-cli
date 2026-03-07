@@ -3,10 +3,10 @@ import path from 'node:path';
 import readline from 'node:readline';
 import { saveLocalConfig, loadTeamConfig } from './config.js';
 import { injectHooksToAllTools } from './hooks.js';
-import { cloneRepo, configureGitUser } from './utils/git.js';
+import { configureGitUser } from './utils/git.js';
 import { pushRepoDirectly } from './utils/git.js';
-import { verifyToken, getCurrentUser, getProject, isRepoEmpty, fileExistsInRepo, createProject, getNamespaceId } from './utils/tgit-api.js';
-import { parseRepoInput, type RepoInfo } from './utils/repo-url.js';
+import { ensureGfInstalled, ensureAuthenticated, gfRepoClone } from './utils/gf-cli.js';
+import { parseRepoInput } from './utils/repo-url.js';
 import { ensureDir, writeFile, pathExists, expandHome, readFileSafe } from './utils/fs.js';
 import { log, spinner } from './utils/logger.js';
 import { TEAMAI_HOME, type GlobalOptions, type LocalConfig } from './types.js';
@@ -21,72 +21,31 @@ function askQuestion(prompt: string): Promise<string> {
   });
 }
 
-async function resolveRepo(info: RepoInfo): Promise<string> {
-  const spin = spinner(`Checking repo ${info.owner}/${info.repo}...`).start();
-
-  const project = await getProject(info.projectId);
-
-  if (!project) {
-    // Repo does not exist — ask to create
-    spin.info(`Repo ${info.owner}/${info.repo} does not exist on TGit`);
-    const answer = await askQuestion(`Create repo ${info.owner}/${info.repo}? [Y/n] `);
-    if (answer && answer.toLowerCase() !== 'y') {
-      log.error('Aborted. Please provide an existing repo or confirm creation.');
-      process.exit(1);
-    }
-
-    const createSpin = spinner(`Creating repo ${info.owner}/${info.repo}...`).start();
-    try {
-      const namespaceId = await getNamespaceId(info.owner);
-      await createProject(info.repo, namespaceId ?? undefined);
-      createSpin.succeed(`Repo ${info.owner}/${info.repo} created`);
-    } catch (e) {
-      createSpin.fail(`Failed to create repo: ${(e as Error).message}`);
-      process.exit(1);
-    }
-  } else {
-    // Repo exists — check if empty
-    const empty = await isRepoEmpty(info.projectId);
-    if (empty) {
-      spin.succeed(`Repo ${info.owner}/${info.repo} exists (empty, ready to use)`);
-    } else {
-      // Check if repo is already a teamai repo (has teamai.yaml)
-      const isTeamaiRepo = await fileExistsInRepo(info.projectId, 'teamai.yaml', project.default_branch);
-      if (isTeamaiRepo) {
-        spin.succeed(`Repo ${info.owner}/${info.repo} is an existing teamai repo`);
-      } else {
-        spin.warn(`Repo ${info.owner}/${info.repo} exists and is non-empty`);
-        const answer = await askQuestion('Continue using this repo? [Y/n] ');
-        if (answer && answer.toLowerCase() !== 'y') {
-          log.error('Aborted.');
-          process.exit(1);
-        }
-      }
-    }
-  }
-
-  return info.httpsUrl;
-}
-
 export async function init(options: GlobalOptions & { repo?: string }): Promise<void> {
   log.info('Initializing teamai...');
 
-  // Step 1: Verify TGit token
-  const spin = spinner('Verifying TGit token...').start();
-  let user;
+  // Step 1a: Ensure gf CLI is installed
+  await ensureGfInstalled();
+
+  // Step 1b: Authenticate via gf
+  const spin = spinner('Checking authentication...').start();
+  let username: string;
   try {
-    user = await verifyToken();
-    spin.succeed(`Authenticated as ${user.username} (${user.name})`);
+    const { gfIsAuthenticated, gfAuthWhoami } = await import('./utils/gf-cli.js');
+    if (gfIsAuthenticated()) {
+      username = gfAuthWhoami()!;
+      spin.succeed(`Authenticated as ${username}`);
+    } else {
+      spin.info('Not logged in — starting authentication');
+      username = ensureAuthenticated();
+      log.success(`Authenticated as ${username}`);
+    }
   } catch (e) {
-    spin.fail((e as Error).message);
-    log.info('Set TGIT_TOKEN via one of these methods:');
-    log.info('  1. Shell profile: export TGIT_TOKEN=xxx (in ~/.bashrc or ~/.zshrc)');
-    log.info('  2. Env file: echo "TGIT_TOKEN=xxx" > ~/.teamai/env');
-    log.info('Get a token from: https://git.woa.com/profile/account');
+    spin.fail(`Authentication failed: ${(e as Error).message}`);
     process.exit(1);
   }
 
-  // Step 2: Resolve repo
+  // Step 2: Get repo input
   let repoInput = options.repo ?? '';
   if (!repoInput) {
     repoInput = await askQuestion('Team repo (e.g. yourteam/yourproject): ');
@@ -96,7 +55,7 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
     process.exit(1);
   }
 
-  let repoInfo: RepoInfo;
+  let repoInfo;
   try {
     repoInfo = parseRepoInput(repoInput);
   } catch (e) {
@@ -104,18 +63,14 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
     process.exit(1);
   }
 
-  const repoUrl = await resolveRepo(repoInfo);
-
   // Step 3: Clone or link repo
   const defaultLocalPath = path.join(process.env.HOME ?? '', '.teamai', 'team-repo');
   let localPath: string;
 
   if (await pathExists(expandHome(defaultLocalPath))) {
-    // Existing clone found at default location — skip prompt
     localPath = expandHome(defaultLocalPath);
     log.info(`Repo already exists at ${localPath}, using existing clone`);
   } else {
-    // No existing clone — ask for path
     let inputPath = await askQuestion(`Local clone path [${defaultLocalPath}]: `);
     if (!inputPath) inputPath = defaultLocalPath;
     localPath = expandHome(inputPath);
@@ -124,7 +79,8 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
   if (!await pathExists(localPath)) {
     const cloneSpin = spinner('Cloning team repo...').start();
     try {
-      await cloneRepo(repoUrl, localPath);
+      // Use gf repo clone — embeds OAuth token in remote URL for automatic auth
+      gfRepoClone(`${repoInfo.owner}/${repoInfo.repo}`, localPath);
       cloneSpin.succeed('Team repo cloned');
     } catch (e) {
       cloneSpin.fail(`Clone failed: ${(e as Error).message}`);
@@ -133,7 +89,7 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
   }
 
   // Step 3.5: Configure git user for the team repo
-  await configureGitUser(localPath, user.username, user.name);
+  await configureGitUser(localPath, username, username);
 
   // Step 4: Load team config
   const teamConfig = await loadTeamConfig(localPath);
@@ -142,7 +98,7 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
     const defaultConfig = YAML.stringify({
       team: 'my-team',
       description: 'Team AI DevKit shared resources',
-      repo: repoUrl,
+      repo: repoInfo.httpsUrl,
       sharing: {
         skills: { syncTargets: ['claude', 'codex', 'claude-internal', 'cursor', 'codebuddy'] },
         rules: { enforced: [] },
@@ -155,7 +111,6 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
     // Create standard directories
     for (const dir of ['members', 'skills', 'rules', 'docs', 'hooks', 'hooks/scripts', 'instincts', 'env']) {
       await ensureDir(path.join(localPath, dir));
-      // create .gitkeep in empty dirs
       const gitkeep = path.join(localPath, dir, '.gitkeep');
       if (!await pathExists(gitkeep)) {
         await writeFile(gitkeep, '');
@@ -164,20 +119,20 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
   }
 
   // Step 5: Create member file
-  const memberPath = path.join(localPath, 'members', `${user.username}.yaml`);
+  const memberPath = path.join(localPath, 'members', `${username}.yaml`);
   const isNewMember = !await pathExists(memberPath);
   if (isNewMember) {
     const memberYaml = YAML.stringify({
-      username: user.username,
-      displayName: user.name || user.username,
+      username,
+      displayName: username,
       registeredAt: new Date().toISOString(),
     });
     await writeFile(memberPath, memberYaml);
-    log.success(`Registered as team member: ${user.username}`);
+    log.success(`Registered as team member: ${username}`);
 
     if (!options.dryRun) {
       try {
-        await pushRepoDirectly(localPath, `[teamai] Register member: ${user.username}`, [
+        await pushRepoDirectly(localPath, `[teamai] Register member: ${username}`, [
           'members/',
           'teamai.yaml',
           'skills/.gitkeep',
@@ -194,7 +149,7 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
       }
     }
   } else {
-    log.info(`Member ${user.username} already registered`);
+    log.info(`Member ${username} already registered`);
   }
 
   // Step 5.5: Configure default MR reviewers (only for new members / fresh setup)
@@ -208,7 +163,6 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
         .filter(Boolean);
 
       if (reviewers.length > 0) {
-        // Update teamai.yaml with reviewers
         const configPath = path.join(localPath, 'teamai.yaml');
         const configContent = await readFileSafe(configPath);
         if (configContent) {
@@ -234,8 +188,8 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
 
   // Step 6: Save local config
   const localConfig: LocalConfig = {
-    repo: { localPath, remote: repoUrl },
-    username: user.username,
+    repo: { localPath, remote: repoInfo.httpsUrl },
+    username,
   };
   await ensureDir(TEAMAI_HOME);
   await saveLocalConfig(localConfig);

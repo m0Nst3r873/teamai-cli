@@ -20,15 +20,18 @@ git clone https://git.woa.com/teamai/teamai-cli.git ~/.teamai/teamai-cli \
 
 ## 前置条件
 
-设置 TGit Personal Access Token（需要 `api` 权限）：
+无需手动配置 token。`teamai init` 会自动安装 [工蜂 CLI (gf)](https://git.woa.com/AIA/gf) 并引导 OAuth 登录。
+
+<details>
+<summary>手动安装 gf CLI</summary>
 
 ```bash
-# 获取 token: https://git.woa.com/profile/account
-# bash 用户
-echo 'export TGIT_TOKEN=your_token_here' >> ~/.bashrc && source ~/.bashrc
-# zsh 用户 (macOS 默认)
-echo 'export TGIT_TOKEN=your_token_here' >> ~/.zshrc && source ~/.zshrc
+# gf CLI 会在首次 `teamai init` 时自动下载到 ~/.teamai/gf/
+# 如需手动安装，从 https://git.woa.com/AIA/gf/releases 下载对应平台的 tarball
+# 解压到 ~/.teamai/gf/ 即可
 ```
+
+</details>
 
 ## 快速开始
 
@@ -50,7 +53,7 @@ teamai status
 
 | 命令 | 说明 |
 |------|------|
-| `teamai init` | 初始化（TGit 认证、关联仓库、注册成员、配置 reviewers、注入 hooks） |
+| `teamai init` | 初始化（自动安装 gf CLI、OAuth 登录、关联仓库、注册成员、配置 reviewers、注入 hooks） |
 | `teamai push [--all]` | 推送本地新资源到独立分支并创建 Merge Request |
 | `teamai pull [--silent]` | 拉取团队资源并注入到本地 AI 工具 |
 | `teamai sync` | 双向同步（push + pull） |

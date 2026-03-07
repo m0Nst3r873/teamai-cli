@@ -2,7 +2,7 @@ import path from 'node:path';
 import YAML from 'yaml';
 import { requireInit } from './config.js';
 import { pullRepo, pushRepoBranch, generateBranchName } from './utils/git.js';
-import { createMergeRequest, getUserByUsername } from './utils/tgit-api.js';
+import { gfMrCreate } from './utils/gf-cli.js';
 import { parseRepoInput } from './utils/repo-url.js';
 import { ensureDir, readFileSafe, writeFile, pathExists } from './utils/fs.js';
 import { log, spinner } from './utils/logger.js';
@@ -39,6 +39,48 @@ export async function envList(options: GlobalOptions): Promise<void> {
     }
   }
   console.log('');
+}
+
+/**
+ * Helper: create MR via gf CLI for env changes.
+ */
+async function createEnvMr(
+  repoPath: string,
+  branchName: string,
+  commitMsg: string,
+  description: string,
+  teamConfig: { repo: string; reviewers?: string[] },
+  localConfig: { repo: { remote: string } },
+): Promise<void> {
+  const hasChanges = await pushRepoBranch(repoPath, commitMsg, ['env/'], branchName);
+  if (!hasChanges) {
+    log.success('No changes (variable already up to date)');
+    return;
+  }
+  log.success(`Pushed branch ${branchName}`);
+
+  const mrSpin = spinner('Creating Merge Request...').start();
+  try {
+    let repoInfo;
+    try {
+      repoInfo = parseRepoInput(teamConfig.repo);
+    } catch {
+      repoInfo = parseRepoInput(localConfig.repo.remote);
+    }
+
+    const mrUrl = gfMrCreate({
+      repo: `${repoInfo.owner}/${repoInfo.repo}`,
+      source: branchName,
+      target: 'master',
+      title: commitMsg,
+      description,
+      reviewers: teamConfig.reviewers?.length ? teamConfig.reviewers : undefined,
+    });
+    mrSpin.succeed(`Merge Request created: ${mrUrl}`);
+  } catch (e) {
+    mrSpin.fail(`Failed to create MR: ${(e as Error).message}`);
+    log.info(`Branch ${branchName} has been pushed. You can create a MR manually.`);
+  }
 }
 
 /**
@@ -98,48 +140,15 @@ export async function envAdd(
 
   const pushSpin = spinner('Creating branch and MR...').start();
   try {
-    const hasChanges = await pushRepoBranch(repoPath, commitMsg, ['env/'], branchName);
-    if (!hasChanges) {
-      pushSpin.succeed('No changes (variable already up to date)');
-      return;
-    }
-    pushSpin.succeed(`Pushed branch ${branchName}`);
-
-    // Create MR
-    const mrSpin = spinner('Creating Merge Request...').start();
-    try {
-      let repoInfo;
-      try {
-        repoInfo = parseRepoInput(teamConfig.repo);
-      } catch {
-        repoInfo = parseRepoInput(localConfig.repo.remote);
-      }
-
-      const reviewerIds: number[] = [];
-      if (teamConfig.reviewers && teamConfig.reviewers.length > 0) {
-        for (const reviewer of teamConfig.reviewers) {
-          try {
-            const user = await getUserByUsername(reviewer);
-            if (user) reviewerIds.push(user.id);
-          } catch {
-            // skip
-          }
-        }
-      }
-
-      const mr = await createMergeRequest(
-        repoInfo.projectId,
-        branchName,
-        'master',
-        commitMsg,
-        `${action} env variable:\n- \`${key}=${value}\`${options.description ? `\n- Description: ${options.description}` : ''}`,
-        reviewerIds.length > 0 ? reviewerIds : undefined,
-      );
-      mrSpin.succeed(`Merge Request created: ${mr.web_url}`);
-    } catch (e) {
-      mrSpin.fail(`Failed to create MR: ${(e as Error).message}`);
-      log.info(`Branch ${branchName} has been pushed. You can create a MR manually.`);
-    }
+    await createEnvMr(
+      repoPath,
+      branchName,
+      commitMsg,
+      `${action} env variable:\n- \`${key}=${value}\`${options.description ? `\n- Description: ${options.description}` : ''}`,
+      teamConfig,
+      localConfig,
+    );
+    pushSpin.stop();
   } catch (e) {
     pushSpin.fail(`Push failed: ${(e as Error).message}`);
   }
@@ -189,47 +198,15 @@ export async function envRemove(key: string, options: GlobalOptions): Promise<vo
 
   const pushSpin = spinner('Creating branch and MR...').start();
   try {
-    const hasChanges = await pushRepoBranch(repoPath, commitMsg, ['env/'], branchName);
-    if (!hasChanges) {
-      pushSpin.succeed('No changes');
-      return;
-    }
-    pushSpin.succeed(`Pushed branch ${branchName}`);
-
-    const mrSpin = spinner('Creating Merge Request...').start();
-    try {
-      let repoInfo;
-      try {
-        repoInfo = parseRepoInput(teamConfig.repo);
-      } catch {
-        repoInfo = parseRepoInput(localConfig.repo.remote);
-      }
-
-      const reviewerIds: number[] = [];
-      if (teamConfig.reviewers && teamConfig.reviewers.length > 0) {
-        for (const reviewer of teamConfig.reviewers) {
-          try {
-            const user = await getUserByUsername(reviewer);
-            if (user) reviewerIds.push(user.id);
-          } catch {
-            // skip
-          }
-        }
-      }
-
-      const mr = await createMergeRequest(
-        repoInfo.projectId,
-        branchName,
-        'master',
-        commitMsg,
-        `Remove env variable: \`${key}\``,
-        reviewerIds.length > 0 ? reviewerIds : undefined,
-      );
-      mrSpin.succeed(`Merge Request created: ${mr.web_url}`);
-    } catch (e) {
-      mrSpin.fail(`Failed to create MR: ${(e as Error).message}`);
-      log.info(`Branch ${branchName} has been pushed. You can create a MR manually.`);
-    }
+    await createEnvMr(
+      repoPath,
+      branchName,
+      commitMsg,
+      `Remove env variable: \`${key}\``,
+      teamConfig,
+      localConfig,
+    );
+    pushSpin.stop();
   } catch (e) {
     pushSpin.fail(`Push failed: ${(e as Error).message}`);
   }
