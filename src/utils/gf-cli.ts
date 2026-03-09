@@ -21,7 +21,7 @@ const GF_DOWNLOAD_BASE = 'http://mirrors.tencent.com/repository/generic/gongfeng
  */
 export function gfExec(
   args: string[],
-  options?: { inheritStdio?: boolean },
+  options?: { inheritStdio?: boolean; cwd?: string },
 ): { stdout: string; stderr: string; status: number } {
   const gfPath = getGfPath();
   const cmd = `${gfPath} ${args.join(' ')}`;
@@ -31,6 +31,7 @@ export function gfExec(
     const result = spawnSync('bash', ['-c', cmd], {
       stdio: 'inherit',
       env: { ...process.env },
+      cwd: options.cwd,
     });
     return { stdout: '', stderr: '', status: result.status ?? 1 };
   }
@@ -39,6 +40,7 @@ export function gfExec(
     env: { ...process.env },
     encoding: 'utf-8',
     maxBuffer: 10 * 1024 * 1024,
+    cwd: options?.cwd,
   });
 
   return {
@@ -323,6 +325,8 @@ export interface GfMrCreateOptions {
   description?: string;
   /** Reviewer usernames (gf accepts usernames directly, no ID lookup needed) */
   reviewers?: string[];
+  /** Working directory for gf CLI (should be the team repo path) */
+  cwd?: string;
 }
 
 /**
@@ -346,7 +350,7 @@ export function gfMrCreate(opts: GfMrCreateOptions): string {
     args.push('-r', opts.reviewers.join(','));
   }
 
-  const result = gfExec(args);
+  const result = gfExec(args, { cwd: opts.cwd });
   if (result.status !== 0) {
     const errMsg = result.stderr || result.stdout;
     throw new Error(`gf mr create failed: ${errMsg}`);
@@ -365,6 +369,6 @@ export function gfMrCreate(opts: GfMrCreateOptions): string {
     return `https://git.woa.com/${opts.repo}/-/merge_requests/${mrNumMatch[1]}`;
   }
 
-  // Return the raw output as the "URL" if we can't parse it
-  return output || `https://git.woa.com/${opts.repo}/-/merge_requests`;
+  // Could not extract MR URL — treat as failure
+  throw new Error(`gf mr create succeeded but returned unexpected output: ${output}`);
 }

@@ -122,6 +122,7 @@ export async function push(options: GlobalOptions & { all?: boolean }): Promise<
         title: commitMsg,
         description: `Pushed ${allItems.length} resource(s):\n${allItems.map((i) => `- [${i.type}] ${i.name}`).join('\n')}`,
         reviewers: teamConfig.reviewers?.length ? teamConfig.reviewers : undefined,
+        cwd: localConfig.repo.localPath,
       });
       mrSpin.succeed(`Merge Request created: ${mrUrl}`);
     } catch (e) {
