@@ -82,11 +82,14 @@ export type State = z.infer<typeof StateSchema>;
 
 export type ResourceType = 'skills' | 'rules' | 'docs' | 'env';
 
+export type ResourceItemStatus = 'new' | 'modified';
+
 export interface ResourceItem {
   name: string;
   type: ResourceType;
   sourcePath: string;
   relativePath: string;
+  status?: ResourceItemStatus;
 }
 
 export interface ResourceDiff {

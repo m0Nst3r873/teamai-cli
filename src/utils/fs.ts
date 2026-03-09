@@ -1,4 +1,5 @@
 import fse from 'fs-extra';
+import crypto from 'node:crypto';
 import path from 'node:path';
 import { log } from './logger.js';
 
@@ -108,4 +109,116 @@ export async function pathExists(p: string): Promise<boolean> {
  */
 export async function remove(p: string): Promise<void> {
   await fse.remove(expandHome(p));
+}
+
+/**
+ * Get the mtime (last modification time) of a file.
+ * Returns 0 if the file does not exist.
+ */
+export async function getFileMtime(filePath: string): Promise<number> {
+  try {
+    const stat = await fse.stat(expandHome(filePath));
+    return stat.mtimeMs;
+  } catch {
+    return 0;
+  }
+}
+
+/**
+ * Get the latest mtime across all files in a directory (recursive).
+ * Returns 0 if the directory does not exist or is empty.
+ */
+export async function getDirLatestMtime(dirPath: string): Promise<number> {
+  const expanded = expandHome(dirPath);
+  if (!await fse.pathExists(expanded)) return 0;
+
+  let latest = 0;
+  const entries = await fse.readdir(expanded, { withFileTypes: true });
+  for (const entry of entries) {
+    const fullPath = path.join(expanded, entry.name);
+    if (entry.isFile()) {
+      const stat = await fse.stat(fullPath);
+      if (stat.mtimeMs > latest) latest = stat.mtimeMs;
+    } else if (entry.isDirectory()) {
+      const sub = await getDirLatestMtime(fullPath);
+      if (sub > latest) latest = sub;
+    }
+  }
+  return latest;
+}
+
+/**
+ * Compute SHA-256 hash of a file's contents. Returns null if file does not exist.
+ */
+async function fileHash(filePath: string): Promise<string | null> {
+  try {
+    const content = await fse.readFile(filePath);
+    return crypto.createHash('sha256').update(content).digest('hex');
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Compare two files by content. Returns true if they have identical content.
+ * Returns false if either file does not exist or content differs.
+ */
+export async function fileContentEqual(fileA: string, fileB: string): Promise<boolean> {
+  const [hashA, hashB] = await Promise.all([
+    fileHash(expandHome(fileA)),
+    fileHash(expandHome(fileB)),
+  ]);
+  if (hashA === null || hashB === null) return false;
+  return hashA === hashB;
+}
+
+/**
+ * Recursively compare two directories by content.
+ * Returns true only if both directories have exactly the same files with identical content.
+ * Returns false if either directory does not exist.
+ */
+export async function dirContentEqual(dirA: string, dirB: string): Promise<boolean> {
+  const expandedA = expandHome(dirA);
+  const expandedB = expandHome(dirB);
+
+  if (!await fse.pathExists(expandedA) || !await fse.pathExists(expandedB)) return false;
+
+  // Collect all relative file paths from both directories
+  const filesA = await collectFiles(expandedA, '');
+  const filesB = await collectFiles(expandedB, '');
+
+  // Same set of files?
+  if (filesA.size !== filesB.size) return false;
+  for (const rel of filesA) {
+    if (!filesB.has(rel)) return false;
+  }
+
+  // Same content?
+  for (const rel of filesA) {
+    const equal = await fileContentEqual(
+      path.join(expandedA, rel),
+      path.join(expandedB, rel),
+    );
+    if (!equal) return false;
+  }
+
+  return true;
+}
+
+/**
+ * Recursively collect all relative file paths under a directory.
+ */
+async function collectFiles(base: string, prefix: string): Promise<Set<string>> {
+  const result = new Set<string>();
+  const entries = await fse.readdir(path.join(base, prefix), { withFileTypes: true });
+  for (const entry of entries) {
+    const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isFile()) {
+      result.add(rel);
+    } else if (entry.isDirectory()) {
+      const sub = await collectFiles(base, rel);
+      for (const s of sub) result.add(s);
+    }
+  }
+  return result;
 }

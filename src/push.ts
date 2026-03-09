@@ -20,6 +20,15 @@ function askConfirm(prompt: string): Promise<boolean> {
 export async function push(options: GlobalOptions & { all?: boolean }): Promise<void> {
   const { localConfig, teamConfig } = await requireInit();
 
+  // Pull latest master BEFORE scanning so detection runs against up-to-date repo
+  const pullSpin = spinner('Pulling latest master...').start();
+  try {
+    await pullRepo(localConfig.repo.localPath);
+    pullSpin.succeed('Master up to date');
+  } catch (e) {
+    pullSpin.warn(`Pull failed: ${(e as Error).message}`);
+  }
+
   const spin = spinner('Scanning local resources...').start();
 
   // Scan for pushable resources
@@ -35,16 +44,17 @@ export async function push(options: GlobalOptions & { all?: boolean }): Promise<
   spin.stop();
 
   if (allItems.length === 0) {
-    log.info('No new resources to push');
+    log.info('No new or modified resources to push');
     return;
   }
 
   // Display items
   console.log('');
-  console.log(`Found ${allItems.length} new resource(s) to push:`);
+  console.log(`Found ${allItems.length} resource(s) to push:`);
   console.log('');
   for (const item of allItems) {
-    console.log(`  [${item.type}] ${item.name}`);
+    const statusLabel = item.status === 'modified' ? ' (modified)' : ' (new)';
+    console.log(`  [${item.type}] ${item.name}${statusLabel}`);
     if (options.verbose) {
       console.log(`    from: ${item.sourcePath}`);
     }
@@ -63,15 +73,6 @@ export async function push(options: GlobalOptions & { all?: boolean }): Promise<
       log.info('Cancelled');
       return;
     }
-  }
-
-  // Pull latest master before pushing
-  const pullSpin = spinner('Pulling latest master...').start();
-  try {
-    await pullRepo(localConfig.repo.localPath);
-    pullSpin.succeed('Master up to date');
-  } catch (e) {
-    pullSpin.warn(`Pull failed: ${(e as Error).message}`);
   }
 
   // Push each item to local repo

@@ -1,14 +1,16 @@
 import path from 'node:path';
 import { ResourceHandler } from './base.js';
-import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
-import { listDirs, pathExists, copyDir, remove } from '../utils/fs.js';
+import type { ResourceItem, ResourceItemStatus, TeamaiConfig, LocalConfig } from '../types.js';
+import { listDirs, pathExists, copyDir, remove, dirContentEqual, getDirLatestMtime } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 
 export class SkillsHandler extends ResourceHandler {
   readonly type = 'skills' as const;
 
   /**
-   * Scan local AI tool skill directories for skills not in the team repo.
+   * Scan local AI tool skill directories for skills that are new or modified
+   * compared to the team repo. Compares across ALL tool directories and picks
+   * the one with the latest mtime when multiple dirs have modifications.
    */
   async scanLocalForPush(teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
     const teamSkillsDir = path.join(localConfig.repo.localPath, 'skills');
@@ -17,8 +19,8 @@ export class SkillsHandler extends ResourceHandler {
     // Read tombstones to skip previously deleted resources
     const tombstones = await this.readTombstones(localConfig);
 
-    const localSkills: ResourceItem[] = [];
-    const seen = new Set<string>();
+    // Collect the best candidate for each skill name across all tool directories
+    const candidates = new Map<string, { sourcePath: string; mtime: number; status: ResourceItemStatus }>();
 
     // Scan each tool's skills directory
     for (const [_tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
@@ -27,23 +29,55 @@ export class SkillsHandler extends ResourceHandler {
 
       const dirs = await listDirs(skillsDir);
       for (const dir of dirs) {
-        if (seen.has(dir) || teamSkills.has(dir)) continue;
         if (tombstones.has(dir)) continue;
         // Check for SKILL.md to confirm it's a valid skill
         const skillMd = path.join(skillsDir, dir, 'SKILL.md');
         if (!await pathExists(skillMd)) continue;
 
-        seen.add(dir);
-        localSkills.push({
-          name: dir,
-          type: 'skills',
-          sourcePath: path.join(skillsDir, dir),
-          relativePath: `skills/${dir}`,
-        });
+        const localDirPath = path.join(skillsDir, dir);
+
+        if (teamSkills.has(dir)) {
+          // Skill exists in team repo — check if content differs
+          const teamDirPath = path.join(teamSkillsDir, dir);
+          const equal = await dirContentEqual(localDirPath, teamDirPath);
+          if (equal) continue; // This tool dir's copy is identical, skip
+
+          // Content differs — candidate for "modified"
+          const mtime = await getDirLatestMtime(localDirPath);
+          const existing = candidates.get(dir);
+          if (!existing || mtime > existing.mtime) {
+            candidates.set(dir, { sourcePath: localDirPath, mtime, status: 'modified' });
+          }
+        } else {
+          // Skill does not exist in team repo — candidate for "new"
+          const existing = candidates.get(dir);
+          if (!existing) {
+            const mtime = await getDirLatestMtime(localDirPath);
+            candidates.set(dir, { sourcePath: localDirPath, mtime, status: 'new' });
+          } else if (existing.status === 'new') {
+            // Multiple tool dirs have the same new skill — pick latest mtime
+            const mtime = await getDirLatestMtime(localDirPath);
+            if (mtime > existing.mtime) {
+              candidates.set(dir, { sourcePath: localDirPath, mtime, status: 'new' });
+            }
+          }
+        }
       }
     }
 
-    return localSkills;
+    // Convert candidates map to items array
+    const items: ResourceItem[] = [];
+    for (const [name, candidate] of candidates) {
+      items.push({
+        name,
+        type: 'skills',
+        sourcePath: candidate.sourcePath,
+        relativePath: `skills/${name}`,
+        status: candidate.status,
+      });
+    }
+
+    return items;
   }
 
   /**

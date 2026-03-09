@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { ResourceHandler } from './base.js';
-import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
-import { listFiles, pathExists, readFileSafe, writeFile, copyFile, ensureDir, remove } from '../utils/fs.js';
+import type { ResourceItem, ResourceItemStatus, TeamaiConfig, LocalConfig } from '../types.js';
+import { listFiles, pathExists, readFileSafe, writeFile, copyFile, ensureDir, remove, fileContentEqual, getFileMtime } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 import { TEAMAI_RULES_START, TEAMAI_RULES_END } from '../types.js';
 
@@ -10,7 +10,9 @@ export class RulesHandler extends ResourceHandler {
 
   /**
    * Scan for local rule .md files that are new or modified compared to the team repo.
-   * Looks in each tool's configured rules/ directory (e.g. ~/.claude/rules/).
+   * Looks in ALL tool's configured rules/ directories and compares each against the
+   * team repo version. When multiple tool dirs have a modified copy, picks the one
+   * with the latest mtime.
    */
   async scanLocalForPush(teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
     const teamRulesDir = path.join(localConfig.repo.localPath, 'rules');
@@ -23,8 +25,8 @@ export class RulesHandler extends ResourceHandler {
     // Read tombstones to skip previously deleted resources
     const tombstones = await this.readTombstones(localConfig);
 
-    const items: ResourceItem[] = [];
-    const seen = new Set<string>();
+    // Collect the best candidate for each rule name across all tool directories
+    const candidates = new Map<string, { sourcePath: string; mtime: number; status: ResourceItemStatus }>();
 
     // Scan each tool's rules/ directory
     for (const [_tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
@@ -37,26 +39,49 @@ export class RulesHandler extends ResourceHandler {
       for (const file of files) {
         if (!file.endsWith('.md')) continue;
         const name = file.replace(/\.md$/, '');
-        if (seen.has(file)) continue;
         if (tombstones.has(name)) continue;
 
         const localFilePath = path.join(rulesDir, file);
 
         if (teamRules.has(file)) {
-          // Compare content to detect modifications
-          const localContent = await readFileSafe(localFilePath);
-          const teamContent = await readFileSafe(path.join(teamRulesDir, file));
-          if (localContent === teamContent) continue;
-        }
+          // File exists in team repo — check if content differs
+          const teamFilePath = path.join(teamRulesDir, file);
+          const equal = await fileContentEqual(localFilePath, teamFilePath);
+          if (equal) continue; // This tool dir's copy is identical, skip
 
-        seen.add(file);
-        items.push({
-          name,
-          type: 'rules',
-          sourcePath: localFilePath,
-          relativePath: `rules/${file}`,
-        });
+          // Content differs — candidate for "modified"
+          const mtime = await getFileMtime(localFilePath);
+          const existing = candidates.get(name);
+          if (!existing || mtime > existing.mtime) {
+            candidates.set(name, { sourcePath: localFilePath, mtime, status: 'modified' });
+          }
+        } else {
+          // File does not exist in team repo — candidate for "new"
+          const existing = candidates.get(name);
+          if (!existing) {
+            const mtime = await getFileMtime(localFilePath);
+            candidates.set(name, { sourcePath: localFilePath, mtime, status: 'new' });
+          } else if (existing.status === 'new') {
+            // Multiple tool dirs have the same new file — pick latest mtime
+            const mtime = await getFileMtime(localFilePath);
+            if (mtime > existing.mtime) {
+              candidates.set(name, { sourcePath: localFilePath, mtime, status: 'new' });
+            }
+          }
+        }
       }
+    }
+
+    // Convert candidates map to items array
+    const items: ResourceItem[] = [];
+    for (const [name, candidate] of candidates) {
+      items.push({
+        name,
+        type: 'rules',
+        sourcePath: candidate.sourcePath,
+        relativePath: `rules/${name}.md`,
+        status: candidate.status,
+      });
     }
 
     return items;

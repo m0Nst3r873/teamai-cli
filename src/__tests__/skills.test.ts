@@ -1,0 +1,233 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import path from 'node:path';
+import os from 'node:os';
+import fse from 'fs-extra';
+
+vi.mock('../utils/logger.js', () => ({
+  log: {
+    info: vi.fn(),
+    success: vi.fn(),
+    warn: vi.fn(),
+    error: vi.fn(),
+    debug: vi.fn(),
+    dim: vi.fn(),
+  },
+}));
+
+import { SkillsHandler } from '../resources/skills.js';
+import type { TeamaiConfig, LocalConfig } from '../types.js';
+
+describe('SkillsHandler.scanLocalForPush', () => {
+  let tmpDir: string;
+  let homeDir: string;
+  let handler: SkillsHandler;
+  let teamConfig: TeamaiConfig;
+  let localConfig: LocalConfig;
+
+  beforeEach(async () => {
+    tmpDir = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-skills-test-'));
+    homeDir = path.join(tmpDir, 'home');
+
+    const repoPath = path.join(tmpDir, 'team-repo');
+    await fse.ensureDir(path.join(repoPath, 'skills'));
+    await fse.ensureDir(path.join(homeDir, '.claude', 'skills'));
+
+    vi.stubEnv('HOME', homeDir);
+
+    handler = new SkillsHandler();
+
+    teamConfig = {
+      team: 'test',
+      description: '',
+      repo: 'https://git.woa.com/test/repo.git',
+      reviewers: [],
+      sharing: { skills: { syncTargets: [] }, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      toolPaths: {
+        claude: { skills: '.claude/skills', rules: '.claude/rules' },
+      },
+    };
+
+    localConfig = {
+      repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
+      username: 'testuser',
+    };
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fse.remove(tmpDir);
+  });
+
+  it('should detect a new skill with status "new"', async () => {
+    const skillDir = path.join(homeDir, '.claude/skills', 'my-skill');
+    await fse.ensureDir(skillDir);
+    await fse.writeFile(path.join(skillDir, 'SKILL.md'), '# My Skill');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const item = items.find((i) => i.name === 'my-skill');
+    expect(item).toBeDefined();
+    expect(item!.status).toBe('new');
+  });
+
+  it('should NOT detect a skill without SKILL.md', async () => {
+    const skillDir = path.join(homeDir, '.claude/skills', 'no-skillmd');
+    await fse.ensureDir(skillDir);
+    await fse.writeFile(path.join(skillDir, 'README.md'), 'not a skill');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const names = items.map((i) => i.name);
+    expect(names).not.toContain('no-skillmd');
+  });
+
+  it('should detect a modified skill with status "modified"', async () => {
+    // Team repo has v1
+    const teamSkillDir = path.join(localConfig.repo.localPath, 'skills', 'my-skill');
+    await fse.ensureDir(teamSkillDir);
+    await fse.writeFile(path.join(teamSkillDir, 'SKILL.md'), '# v1');
+
+    // Local has v2
+    const localSkillDir = path.join(homeDir, '.claude/skills', 'my-skill');
+    await fse.ensureDir(localSkillDir);
+    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), '# v2');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const item = items.find((i) => i.name === 'my-skill');
+    expect(item).toBeDefined();
+    expect(item!.status).toBe('modified');
+  });
+
+  it('should NOT include an unchanged skill', async () => {
+    const content = '# Same Skill';
+
+    const teamSkillDir = path.join(localConfig.repo.localPath, 'skills', 'same-skill');
+    await fse.ensureDir(teamSkillDir);
+    await fse.writeFile(path.join(teamSkillDir, 'SKILL.md'), content);
+
+    const localSkillDir = path.join(homeDir, '.claude/skills', 'same-skill');
+    await fse.ensureDir(localSkillDir);
+    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), content);
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const names = items.map((i) => i.name);
+    expect(names).not.toContain('same-skill');
+  });
+
+  it('should detect modification when skill has extra file locally', async () => {
+    const teamSkillDir = path.join(localConfig.repo.localPath, 'skills', 'my-skill');
+    await fse.ensureDir(teamSkillDir);
+    await fse.writeFile(path.join(teamSkillDir, 'SKILL.md'), '# Skill');
+
+    const localSkillDir = path.join(homeDir, '.claude/skills', 'my-skill');
+    await fse.ensureDir(localSkillDir);
+    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), '# Skill');
+    await fse.writeFile(path.join(localSkillDir, 'helper.sh'), 'echo hi');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const item = items.find((i) => i.name === 'my-skill');
+    expect(item).toBeDefined();
+    expect(item!.status).toBe('modified');
+  });
+
+  it('should not detect a tombstoned skill', async () => {
+    const skillDir = path.join(homeDir, '.claude/skills', 'removed-skill');
+    await fse.ensureDir(skillDir);
+    await fse.writeFile(path.join(skillDir, 'SKILL.md'), '# Removed');
+
+    // Write tombstone
+    const tombstonePath = path.join(localConfig.repo.localPath, 'skills', '.removed');
+    await fse.writeFile(tombstonePath, 'removed-skill\n');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const names = items.map((i) => i.name);
+    expect(names).not.toContain('removed-skill');
+  });
+
+  it('should not detect a tombstoned modified skill', async () => {
+    const teamSkillDir = path.join(localConfig.repo.localPath, 'skills', 'removed-skill');
+    await fse.ensureDir(teamSkillDir);
+    await fse.writeFile(path.join(teamSkillDir, 'SKILL.md'), '# v1');
+
+    const localSkillDir = path.join(homeDir, '.claude/skills', 'removed-skill');
+    await fse.ensureDir(localSkillDir);
+    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), '# v2');
+
+    const tombstonePath = path.join(localConfig.repo.localPath, 'skills', '.removed');
+    await fse.writeFile(tombstonePath, 'removed-skill\n');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const names = items.map((i) => i.name);
+    expect(names).not.toContain('removed-skill');
+  });
+
+  it('should detect both new and modified skills together', async () => {
+    // Modified
+    const teamSkillDir = path.join(localConfig.repo.localPath, 'skills', 'existing');
+    await fse.ensureDir(teamSkillDir);
+    await fse.writeFile(path.join(teamSkillDir, 'SKILL.md'), '# v1');
+
+    const localExisting = path.join(homeDir, '.claude/skills', 'existing');
+    await fse.ensureDir(localExisting);
+    await fse.writeFile(path.join(localExisting, 'SKILL.md'), '# v2');
+
+    // New
+    const localNew = path.join(homeDir, '.claude/skills', 'brand-new');
+    await fse.ensureDir(localNew);
+    await fse.writeFile(path.join(localNew, 'SKILL.md'), '# New');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    expect(items.find((i) => i.name === 'existing')?.status).toBe('modified');
+    expect(items.find((i) => i.name === 'brand-new')?.status).toBe('new');
+  });
+
+  it('should pick the modified version from the tool dir with latest mtime across multiple tools', async () => {
+    await fse.ensureDir(path.join(homeDir, '.codex', 'skills'));
+    teamConfig.toolPaths.codex = { skills: '.codex/skills', rules: '.codex/rules' };
+
+    const teamSkillDir = path.join(localConfig.repo.localPath, 'skills', 'shared');
+    await fse.ensureDir(teamSkillDir);
+    await fse.writeFile(path.join(teamSkillDir, 'SKILL.md'), '# original');
+
+    // claude dir has an older modification
+    const claudeDir = path.join(homeDir, '.claude/skills', 'shared');
+    await fse.ensureDir(claudeDir);
+    await fse.writeFile(path.join(claudeDir, 'SKILL.md'), '# claude-modified');
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    // codex dir has a newer modification
+    const codexDir = path.join(homeDir, '.codex/skills', 'shared');
+    await fse.ensureDir(codexDir);
+    await fse.writeFile(path.join(codexDir, 'SKILL.md'), '# codex-modified');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const item = items.find((i) => i.name === 'shared');
+    expect(item).toBeDefined();
+    expect(item!.status).toBe('modified');
+    expect(item!.sourcePath).toBe(codexDir);
+  });
+
+  it('should detect modification even if only one tool dir differs and others match', async () => {
+    await fse.ensureDir(path.join(homeDir, '.codex', 'skills'));
+    teamConfig.toolPaths.codex = { skills: '.codex/skills', rules: '.codex/rules' };
+
+    const teamSkillDir = path.join(localConfig.repo.localPath, 'skills', 'shared');
+    await fse.ensureDir(teamSkillDir);
+    await fse.writeFile(path.join(teamSkillDir, 'SKILL.md'), '# original');
+
+    // claude matches team repo
+    const claudeDir = path.join(homeDir, '.claude/skills', 'shared');
+    await fse.ensureDir(claudeDir);
+    await fse.writeFile(path.join(claudeDir, 'SKILL.md'), '# original');
+
+    // codex has a modification
+    const codexDir = path.join(homeDir, '.codex/skills', 'shared');
+    await fse.ensureDir(codexDir);
+    await fse.writeFile(path.join(codexDir, 'SKILL.md'), '# modified');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const item = items.find((i) => i.name === 'shared');
+    expect(item).toBeDefined();
+    expect(item!.status).toBe('modified');
+    expect(item!.sourcePath).toBe(codexDir);
+  });
+});

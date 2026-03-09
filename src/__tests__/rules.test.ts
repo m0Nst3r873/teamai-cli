@@ -82,14 +82,15 @@ describe('RulesHandler.scanLocalForPush — modified rule detection', () => {
     await fse.remove(tmpDir);
   });
 
-  it('should detect a modified local rule as pushable', async () => {
+  it('should detect a modified local rule as pushable with status "modified"', async () => {
     const teamRulesDir = path.join(localConfig.repo.localPath, 'rules');
     await fse.writeFile(path.join(teamRulesDir, 'shared-rule.md'), 'old content');
     await fse.writeFile(path.join(homeDir, '.claude/rules', 'shared-rule.md'), 'new content');
 
     const items = await handler.scanLocalForPush(teamConfig, localConfig);
-    const names = items.map((i) => i.name);
-    expect(names).toContain('shared-rule');
+    const item = items.find((i) => i.name === 'shared-rule');
+    expect(item).toBeDefined();
+    expect(item!.status).toBe('modified');
   });
 
   it('should NOT include an unchanged rule', async () => {
@@ -102,12 +103,13 @@ describe('RulesHandler.scanLocalForPush — modified rule detection', () => {
     expect(names).not.toContain('same-rule');
   });
 
-  it('should still detect new rules that are not in the team repo', async () => {
+  it('should still detect new rules that are not in the team repo with status "new"', async () => {
     await fse.writeFile(path.join(homeDir, '.claude/rules', 'brand-new.md'), 'new rule');
 
     const items = await handler.scanLocalForPush(teamConfig, localConfig);
-    const names = items.map((i) => i.name);
-    expect(names).toContain('brand-new');
+    const item = items.find((i) => i.name === 'brand-new');
+    expect(item).toBeDefined();
+    expect(item!.status).toBe('new');
   });
 
   it('should detect both new and modified rules together', async () => {
@@ -131,5 +133,92 @@ describe('RulesHandler.scanLocalForPush — modified rule detection', () => {
     const items = await handler.scanLocalForPush(teamConfig, localConfig);
     const names = items.map((i) => i.name);
     expect(names).not.toContain('removed-rule');
+  });
+
+  it('should pick the modified version from the tool dir with latest mtime across multiple tools', async () => {
+    // Setup: two tool directories
+    await fse.ensureDir(path.join(homeDir, '.codex', 'rules'));
+    teamConfig.toolPaths.codex = { skills: '.codex/skills', rules: '.codex/rules' };
+
+    const teamRulesDir = path.join(localConfig.repo.localPath, 'rules');
+    await fse.writeFile(path.join(teamRulesDir, 'shared.md'), 'original');
+
+    // claude dir has an older modification
+    const claudePath = path.join(homeDir, '.claude/rules', 'shared.md');
+    await fse.writeFile(claudePath, 'claude-modified');
+
+    // Wait a bit to ensure mtime differs
+    await new Promise((r) => setTimeout(r, 50));
+
+    // codex dir has a newer modification
+    const codexPath = path.join(homeDir, '.codex/rules', 'shared.md');
+    await fse.writeFile(codexPath, 'codex-modified');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const item = items.find((i) => i.name === 'shared');
+    expect(item).toBeDefined();
+    expect(item!.status).toBe('modified');
+    expect(item!.sourcePath).toBe(codexPath);
+  });
+
+  it('should detect modification even if only one tool dir differs and others match team repo', async () => {
+    // Setup: two tool directories
+    await fse.ensureDir(path.join(homeDir, '.codex', 'rules'));
+    teamConfig.toolPaths.codex = { skills: '.codex/skills', rules: '.codex/rules' };
+
+    const teamRulesDir = path.join(localConfig.repo.localPath, 'rules');
+    await fse.writeFile(path.join(teamRulesDir, 'shared.md'), 'original');
+
+    // claude dir matches team repo
+    await fse.writeFile(path.join(homeDir, '.claude/rules', 'shared.md'), 'original');
+
+    // codex dir has a modification
+    const codexPath = path.join(homeDir, '.codex/rules', 'shared.md');
+    await fse.writeFile(codexPath, 'modified-in-codex');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const item = items.find((i) => i.name === 'shared');
+    expect(item).toBeDefined();
+    expect(item!.status).toBe('modified');
+    expect(item!.sourcePath).toBe(codexPath);
+  });
+
+  it('should return empty when all tool dirs match team repo', async () => {
+    await fse.ensureDir(path.join(homeDir, '.codex', 'rules'));
+    teamConfig.toolPaths.codex = { skills: '.codex/skills', rules: '.codex/rules' };
+
+    const teamRulesDir = path.join(localConfig.repo.localPath, 'rules');
+    await fse.writeFile(path.join(teamRulesDir, 'shared.md'), 'same');
+
+    await fse.writeFile(path.join(homeDir, '.claude/rules', 'shared.md'), 'same');
+    await fse.writeFile(path.join(homeDir, '.codex/rules', 'shared.md'), 'same');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    expect(items).toHaveLength(0);
+  });
+
+  it('should detect a new rule that only exists in one tool dir', async () => {
+    await fse.ensureDir(path.join(homeDir, '.codex', 'rules'));
+    teamConfig.toolPaths.codex = { skills: '.codex/skills', rules: '.codex/rules' };
+
+    // Rule only exists in codex, not in claude or team repo
+    const codexPath = path.join(homeDir, '.codex/rules', 'codex-only.md');
+    await fse.writeFile(codexPath, 'only in codex');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const item = items.find((i) => i.name === 'codex-only');
+    expect(item).toBeDefined();
+    expect(item!.status).toBe('new');
+    expect(item!.sourcePath).toBe(codexPath);
+  });
+
+  it('should skip tool dirs without rules path configured', async () => {
+    teamConfig.toolPaths.norules = { skills: '.norules/skills' };
+
+    await fse.writeFile(path.join(homeDir, '.claude/rules', 'my-rule.md'), 'content');
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    // Should still find the claude rule, and not crash on the norules tool
+    expect(items.find((i) => i.name === 'my-rule')).toBeDefined();
   });
 });
