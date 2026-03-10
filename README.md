@@ -1,6 +1,6 @@
-# teamai — 团队 AI 经验共享框架 TeamAI
+# TeamAI — 团队 AI 经验共享框架
 
-团队 AI 经验共享框架。自动在团队成员之间同步 skills、rules、docs、hooks 等 AI 工具配置。
+团队 AI 经验共享框架。自动在团队成员之间同步 skills、rules、docs 等 AI 工具配置。
 
 ## 安装
 
@@ -8,33 +8,9 @@
 npm install -g @tencent/teamai-cli --registry=http://r.tnpm.oa.com
 ```
 
-<details>
-<summary>从源码安装</summary>
-
-```bash
-git clone https://git.woa.com/teamai/teamai-cli.git ~/.teamai/teamai-cli \
-  && cd ~/.teamai/teamai-cli && npm install && npm run build && npm link
-```
-
-</details>
-
-## 前置条件
-
-无需手动配置 token。`teamai init` 会自动安装 [工蜂 CLI (gf)](https://git.woa.com/AIA/gf) 并引导 OAuth 登录。
-
-<details>
-<summary>手动安装 gf CLI</summary>
-
-```bash
-# gf CLI 会在首次 `teamai init` 时自动下载到 ~/.teamai/gf/
-# 如需手动安装，从 https://git.woa.com/AIA/gf/releases 下载对应平台的 tarball
-# 解压到 ~/.teamai/gf/ 即可
-```
-
-</details>
 
 ## 快速开始
-
+### 团队成员
 ```bash
 # 1. 初始化（关联团队仓库、注册成员、注入 hooks）
 teamai init --repo yourteam/yourproject
@@ -48,6 +24,9 @@ teamai push
 # 4. 查看状态
 teamai status
 ```
+
+### 管理员
+需要先在 git.woa.com 上创建好团队共享经验的仓库，并把所有团队的成员都加入到 master(可通过 user group 帮忙组织快捷添加)
 
 ## 命令
 
