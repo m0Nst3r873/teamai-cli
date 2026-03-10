@@ -249,4 +249,42 @@ describe('dirContentEqual', () => {
 
     expect(await dirContentEqual(dirA, dirB)).toBe(true);
   });
+
+  it('should return true when only ignored files differ', async () => {
+    const dirA = path.join(tmpDir, 'a');
+    const dirB = path.join(tmpDir, 'b');
+    await fse.ensureDir(dirA);
+    await fse.ensureDir(dirB);
+    await fse.writeFile(path.join(dirA, 'file.md'), 'same');
+    await fse.writeFile(path.join(dirB, 'file.md'), 'same');
+    // dirB has an extra CONTRIBUTORS file
+    await fse.writeFile(path.join(dirB, 'CONTRIBUTORS'), 'alice\n');
+
+    expect(await dirContentEqual(dirA, dirB, ['CONTRIBUTORS'])).toBe(true);
+  });
+
+  it('should still detect real differences when using ignore', async () => {
+    const dirA = path.join(tmpDir, 'a');
+    const dirB = path.join(tmpDir, 'b');
+    await fse.ensureDir(dirA);
+    await fse.ensureDir(dirB);
+    await fse.writeFile(path.join(dirA, 'file.md'), 'v1');
+    await fse.writeFile(path.join(dirB, 'file.md'), 'v2');
+    await fse.writeFile(path.join(dirB, 'CONTRIBUTORS'), 'alice\n');
+
+    expect(await dirContentEqual(dirA, dirB, ['CONTRIBUTORS'])).toBe(false);
+  });
+
+  it('should return true when both dirs have ignored files with different content', async () => {
+    const dirA = path.join(tmpDir, 'a');
+    const dirB = path.join(tmpDir, 'b');
+    await fse.ensureDir(dirA);
+    await fse.ensureDir(dirB);
+    await fse.writeFile(path.join(dirA, 'file.md'), 'same');
+    await fse.writeFile(path.join(dirB, 'file.md'), 'same');
+    await fse.writeFile(path.join(dirA, 'CONTRIBUTORS'), 'alice\n');
+    await fse.writeFile(path.join(dirB, 'CONTRIBUTORS'), 'bob\n');
+
+    expect(await dirContentEqual(dirA, dirB, ['CONTRIBUTORS'])).toBe(true);
+  });
 });

@@ -177,15 +177,17 @@ export async function fileContentEqual(fileA: string, fileB: string): Promise<bo
  * Returns true only if both directories have exactly the same files with identical content.
  * Returns false if either directory does not exist.
  */
-export async function dirContentEqual(dirA: string, dirB: string): Promise<boolean> {
+export async function dirContentEqual(dirA: string, dirB: string, ignore?: string[]): Promise<boolean> {
   const expandedA = expandHome(dirA);
   const expandedB = expandHome(dirB);
 
   if (!await fse.pathExists(expandedA) || !await fse.pathExists(expandedB)) return false;
 
+  const ignoreSet = ignore ? new Set(ignore) : undefined;
+
   // Collect all relative file paths from both directories
-  const filesA = await collectFiles(expandedA, '');
-  const filesB = await collectFiles(expandedB, '');
+  const filesA = await collectFiles(expandedA, '', ignoreSet);
+  const filesB = await collectFiles(expandedB, '', ignoreSet);
 
   // Same set of files?
   if (filesA.size !== filesB.size) return false;
@@ -208,15 +210,16 @@ export async function dirContentEqual(dirA: string, dirB: string): Promise<boole
 /**
  * Recursively collect all relative file paths under a directory.
  */
-async function collectFiles(base: string, prefix: string): Promise<Set<string>> {
+async function collectFiles(base: string, prefix: string, ignore?: Set<string>): Promise<Set<string>> {
   const result = new Set<string>();
   const entries = await fse.readdir(path.join(base, prefix), { withFileTypes: true });
   for (const entry of entries) {
+    if (ignore?.has(entry.name)) continue;
     const rel = prefix ? `${prefix}/${entry.name}` : entry.name;
     if (entry.isFile()) {
       result.add(rel);
     } else if (entry.isDirectory()) {
-      const sub = await collectFiles(base, rel);
+      const sub = await collectFiles(base, rel, ignore);
       for (const s of sub) result.add(s);
     }
   }

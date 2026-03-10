@@ -1,8 +1,11 @@
 import path from 'node:path';
 import { ResourceHandler } from './base.js';
 import type { ResourceItem, ResourceItemStatus, TeamaiConfig, LocalConfig } from '../types.js';
-import { listDirs, pathExists, copyDir, remove, dirContentEqual, getDirLatestMtime } from '../utils/fs.js';
+import { listDirs, pathExists, copyDir, remove, dirContentEqual, getDirLatestMtime, readFileSafe, writeFile } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
+
+/** File name used to track who has contributed (pushed) a skill. */
+const CONTRIBUTORS_FILE = 'CONTRIBUTORS';
 
 export class SkillsHandler extends ResourceHandler {
   readonly type = 'skills' as const;
@@ -39,7 +42,7 @@ export class SkillsHandler extends ResourceHandler {
         if (teamSkills.has(dir)) {
           // Skill exists in team repo — check if content differs
           const teamDirPath = path.join(teamSkillsDir, dir);
-          const equal = await dirContentEqual(localDirPath, teamDirPath);
+          const equal = await dirContentEqual(localDirPath, teamDirPath, [CONTRIBUTORS_FILE]);
           if (equal) continue; // This tool dir's copy is identical, skip
 
           // Content differs — candidate for "modified"
@@ -102,6 +105,18 @@ export class SkillsHandler extends ResourceHandler {
     const dest = path.join(localConfig.repo.localPath, 'skills', item.name);
     await copyDir(item.sourcePath, dest);
     log.debug(`Copied skill ${item.name} → team repo`);
+
+    // Append current user to CONTRIBUTORS (deduplicated)
+    const contribPath = path.join(dest, CONTRIBUTORS_FILE);
+    const existing = await readFileSafe(contribPath);
+    const contributors = existing
+      ? existing.split('\n').map(l => l.trim()).filter(l => l.length > 0)
+      : [];
+    if (!contributors.includes(localConfig.username)) {
+      contributors.push(localConfig.username);
+      await writeFile(contribPath, contributors.join('\n') + '\n');
+      log.debug(`Added contributor "${localConfig.username}" to ${item.name}`);
+    }
   }
 
   /**
@@ -161,5 +176,15 @@ export class SkillsHandler extends ResourceHandler {
     }
 
     return removed;
+  }
+
+  /**
+   * Read the CONTRIBUTORS list for a skill directory.
+   */
+  static async readContributors(skillDir: string): Promise<string[]> {
+    const contribPath = path.join(skillDir, CONTRIBUTORS_FILE);
+    const content = await readFileSafe(contribPath);
+    if (!content) return [];
+    return content.split('\n').map(l => l.trim()).filter(l => l.length > 0);
   }
 }

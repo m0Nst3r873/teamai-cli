@@ -230,4 +230,197 @@ describe('SkillsHandler.scanLocalForPush', () => {
     expect(item!.status).toBe('modified');
     expect(item!.sourcePath).toBe(codexDir);
   });
+
+  it('should NOT detect modification when only CONTRIBUTORS differs in team repo', async () => {
+    const content = '# Same Skill';
+
+    const teamSkillDir = path.join(localConfig.repo.localPath, 'skills', 'my-skill');
+    await fse.ensureDir(teamSkillDir);
+    await fse.writeFile(path.join(teamSkillDir, 'SKILL.md'), content);
+    await fse.writeFile(path.join(teamSkillDir, 'CONTRIBUTORS'), 'alice\nbob\n');
+
+    const localSkillDir = path.join(homeDir, '.claude/skills', 'my-skill');
+    await fse.ensureDir(localSkillDir);
+    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), content);
+    // Local has no CONTRIBUTORS file
+
+    const items = await handler.scanLocalForPush(teamConfig, localConfig);
+    const names = items.map((i) => i.name);
+    expect(names).not.toContain('my-skill');
+  });
+});
+
+describe('SkillsHandler.pushItem', () => {
+  let tmpDir: string;
+  let homeDir: string;
+  let handler: SkillsHandler;
+  let teamConfig: TeamaiConfig;
+  let localConfig: LocalConfig;
+
+  beforeEach(async () => {
+    tmpDir = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-skills-push-'));
+    homeDir = path.join(tmpDir, 'home');
+
+    const repoPath = path.join(tmpDir, 'team-repo');
+    await fse.ensureDir(path.join(repoPath, 'skills'));
+    await fse.ensureDir(path.join(homeDir, '.claude', 'skills'));
+
+    vi.stubEnv('HOME', homeDir);
+
+    handler = new SkillsHandler();
+
+    teamConfig = {
+      team: 'test',
+      description: '',
+      repo: 'https://git.woa.com/test/repo.git',
+      reviewers: [],
+      sharing: { skills: { syncTargets: [] }, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      toolPaths: {
+        claude: { skills: '.claude/skills', rules: '.claude/rules' },
+      },
+    };
+
+    localConfig = {
+      repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
+      username: 'testuser',
+    };
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fse.remove(tmpDir);
+  });
+
+  it('should create CONTRIBUTORS file with current user on first push', async () => {
+    const localSkillDir = path.join(homeDir, '.claude/skills', 'my-skill');
+    await fse.ensureDir(localSkillDir);
+    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), '# My Skill');
+
+    const item = {
+      name: 'my-skill',
+      type: 'skills' as const,
+      sourcePath: localSkillDir,
+      relativePath: 'skills/my-skill',
+    };
+
+    await handler.pushItem(item, teamConfig, localConfig);
+
+    const contribPath = path.join(localConfig.repo.localPath, 'skills', 'my-skill', 'CONTRIBUTORS');
+    const content = await fse.readFile(contribPath, 'utf-8');
+    expect(content).toBe('testuser\n');
+  });
+
+  it('should not duplicate username on repeated push', async () => {
+    const localSkillDir = path.join(homeDir, '.claude/skills', 'my-skill');
+    await fse.ensureDir(localSkillDir);
+    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), '# My Skill');
+
+    const item = {
+      name: 'my-skill',
+      type: 'skills' as const,
+      sourcePath: localSkillDir,
+      relativePath: 'skills/my-skill',
+    };
+
+    await handler.pushItem(item, teamConfig, localConfig);
+    await handler.pushItem(item, teamConfig, localConfig);
+
+    const contribPath = path.join(localConfig.repo.localPath, 'skills', 'my-skill', 'CONTRIBUTORS');
+    const content = await fse.readFile(contribPath, 'utf-8');
+    expect(content).toBe('testuser\n');
+  });
+
+  it('should append new user to existing CONTRIBUTORS', async () => {
+    const localSkillDir = path.join(homeDir, '.claude/skills', 'my-skill');
+    await fse.ensureDir(localSkillDir);
+    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), '# My Skill');
+
+    // Pre-seed CONTRIBUTORS in the team repo destination
+    const destDir = path.join(localConfig.repo.localPath, 'skills', 'my-skill');
+    await fse.ensureDir(destDir);
+    await fse.writeFile(path.join(destDir, 'CONTRIBUTORS'), 'alice\n');
+
+    const item = {
+      name: 'my-skill',
+      type: 'skills' as const,
+      sourcePath: localSkillDir,
+      relativePath: 'skills/my-skill',
+    };
+
+    await handler.pushItem(item, teamConfig, localConfig);
+
+    const contribPath = path.join(destDir, 'CONTRIBUTORS');
+    const content = await fse.readFile(contribPath, 'utf-8');
+    expect(content).toBe('alice\ntestuser\n');
+  });
+
+  it('should preserve existing contributors when user already listed', async () => {
+    const localSkillDir = path.join(homeDir, '.claude/skills', 'my-skill');
+    await fse.ensureDir(localSkillDir);
+    await fse.writeFile(path.join(localSkillDir, 'SKILL.md'), '# My Skill');
+
+    const destDir = path.join(localConfig.repo.localPath, 'skills', 'my-skill');
+    await fse.ensureDir(destDir);
+    await fse.writeFile(path.join(destDir, 'CONTRIBUTORS'), 'alice\ntestuser\n');
+
+    const item = {
+      name: 'my-skill',
+      type: 'skills' as const,
+      sourcePath: localSkillDir,
+      relativePath: 'skills/my-skill',
+    };
+
+    await handler.pushItem(item, teamConfig, localConfig);
+
+    const contribPath = path.join(destDir, 'CONTRIBUTORS');
+    const content = await fse.readFile(contribPath, 'utf-8');
+    expect(content).toBe('alice\ntestuser\n');
+  });
+});
+
+describe('SkillsHandler.readContributors', () => {
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    tmpDir = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-contrib-'));
+  });
+
+  afterEach(async () => {
+    await fse.remove(tmpDir);
+  });
+
+  it('should return contributors from CONTRIBUTORS file', async () => {
+    const skillDir = path.join(tmpDir, 'my-skill');
+    await fse.ensureDir(skillDir);
+    await fse.writeFile(path.join(skillDir, 'CONTRIBUTORS'), 'alice\nbob\n');
+
+    const contributors = await SkillsHandler.readContributors(skillDir);
+    expect(contributors).toEqual(['alice', 'bob']);
+  });
+
+  it('should return empty array when CONTRIBUTORS does not exist', async () => {
+    const skillDir = path.join(tmpDir, 'my-skill');
+    await fse.ensureDir(skillDir);
+
+    const contributors = await SkillsHandler.readContributors(skillDir);
+    expect(contributors).toEqual([]);
+  });
+
+  it('should handle empty CONTRIBUTORS file', async () => {
+    const skillDir = path.join(tmpDir, 'my-skill');
+    await fse.ensureDir(skillDir);
+    await fse.writeFile(path.join(skillDir, 'CONTRIBUTORS'), '');
+
+    const contributors = await SkillsHandler.readContributors(skillDir);
+    expect(contributors).toEqual([]);
+  });
+
+  it('should trim whitespace and skip blank lines', async () => {
+    const skillDir = path.join(tmpDir, 'my-skill');
+    await fse.ensureDir(skillDir);
+    await fse.writeFile(path.join(skillDir, 'CONTRIBUTORS'), '  alice  \n\n  bob  \n\n');
+
+    const contributors = await SkillsHandler.readContributors(skillDir);
+    expect(contributors).toEqual(['alice', 'bob']);
+  });
 });

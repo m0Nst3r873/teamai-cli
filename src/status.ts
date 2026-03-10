@@ -5,6 +5,7 @@ import { getRepoStatus } from './utils/git.js';
 import { log } from './utils/logger.js';
 import { getAllHandlers } from './resources/index.js';
 import { listDirs, listFiles, pathExists, readFileSafe } from './utils/fs.js';
+import { SkillsHandler } from './resources/skills.js';
 import type { GlobalOptions, ResourceType } from './types.js';
 
 export async function status(options: GlobalOptions): Promise<void> {
@@ -148,7 +149,14 @@ export async function list(type: string | undefined, options: GlobalOptions): Pr
       console.log('  (none)');
     } else {
       for (const item of items) {
-        console.log(`  ${item.name}`);
+        let suffix = '';
+        if (t === 'skills') {
+          const contributors = await SkillsHandler.readContributors(item.sourcePath);
+          if (contributors.length > 0) {
+            suffix = `  (${contributors.join(', ')})`;
+          }
+        }
+        console.log(`  ${item.name}${suffix}`);
         if (options.verbose) {
           console.log(`    path: ${item.sourcePath}`);
         }
