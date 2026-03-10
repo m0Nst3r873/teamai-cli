@@ -223,12 +223,14 @@ export function ensureAuthenticated(): string {
 
 /**
  * Retrieve the OAuth token that gf stored in the git credential helper.
+ * We specify `username=oauth2` to distinguish the gf OAuth token from
+ * any plain-text password the user may have stored in the keychain.
  * Returns null if no credential is found.
  */
 export function gfGetOAuthToken(): string | null {
   try {
     const result = execSync(
-      'printf "protocol=https\\nhost=git.woa.com\\n" | git credential fill',
+      'printf "protocol=https\\nhost=git.woa.com\\nusername=oauth2\\n" | git credential fill',
       { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 5_000 },
     );
     const match = result.match(/^password=(.+)$/m);

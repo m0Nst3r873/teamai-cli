@@ -71,6 +71,7 @@ vi.mock('../utils/gf-cli.js', () => {
     gfCreateRepo: (...args: unknown[]) => mockGfCreateRepo(...args),
     gfIsAuthenticated: () => mockGfIsAuthenticated(),
     gfAuthWhoami: () => mockGfAuthWhoami(),
+    gfGetOAuthToken: vi.fn().mockReturnValue('mock-oauth-token'),
     ensureGfInstalled: () => mockEnsureGfInstalled(),
     ensureAuthenticated: vi.fn().mockReturnValue('testuser'),
     RepoNotFoundError,

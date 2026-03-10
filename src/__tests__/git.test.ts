@@ -28,7 +28,12 @@ vi.mock('fs-extra', () => ({
 vi.mock('node:fs', () => ({
   default: {
     existsSync: vi.fn(() => true),
+    writeFileSync: vi.fn(),
   },
+}));
+
+vi.mock('../utils/gf-cli.js', () => ({
+  gfGetOAuthToken: vi.fn().mockReturnValue('mock-oauth-token'),
 }));
 
 vi.mock('../utils/logger.js', () => ({

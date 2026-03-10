@@ -1,10 +1,40 @@
 import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
 import fse from 'fs-extra';
 import simpleGit, { type SimpleGit } from 'simple-git';
 import { log } from './logger.js';
+import { gfGetOAuthToken } from './gf-cli.js';
 
+/**
+ * Create a SimpleGit instance with OAuth credential helper injected.
+ *
+ * gf repo clone embeds the OAuth token in the remote URL, but that token
+ * expires. By injecting a credential helper that returns the current OAuth
+ * token from the keychain, git operations keep working after token refresh.
+ */
 export function createGit(basePath?: string): SimpleGit {
-  return simpleGit(basePath ? { baseDir: basePath } : undefined);
+  const token = gfGetOAuthToken();
+  if (!token) {
+    return simpleGit(basePath ? { baseDir: basePath } : undefined);
+  }
+
+  // Write a tiny credential-helper script that returns the current token
+  const scriptPath = path.join(os.tmpdir(), `.teamai-git-credential-${process.pid}.sh`);
+  fs.writeFileSync(
+    scriptPath,
+    `#!/bin/sh\nif [ "$1" = "get" ]; then\n  echo "username=oauth2"\n  echo "password=${token}"\nfi\n`,
+    { mode: 0o700 },
+  );
+
+  const opts: Record<string, unknown> = {
+    config: [
+      'credential.helper=',           // clear existing helpers
+      `credential.helper=!${scriptPath}`,  // use our helper
+    ],
+  };
+  if (basePath) opts.baseDir = basePath;
+  return simpleGit(opts);
 }
 
 /**
