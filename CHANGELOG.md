@@ -1,5 +1,19 @@
 # Changelog
 
+## [0.3.13] - 2026-03-17
+
+### Added
+- OpenClaw 支持：skills 和 rules 自动同步到 `~/.openclaw/skills/` 和 `~/.openclaw/rules/` (!57)
+
+### Changed
+- Skills sync 改为自动检测已安装工具，不再依赖 `syncTargets` 配置 (!58)
+  - 遍历所有 `toolPaths` 并通过 `isToolInstalled` 检测 `~/` 下目录是否存在
+  - 新增工具无需修改 `teamai.yaml` 即可自动同步
+  - 与 rules sync 行为保持一致
+
+### Fixed
+- Cursor skills 路径修正：`.cursor/skills-cursor` → `.cursor/skills` (!56)
+
 ## [0.3.12] - 2026-03-12
 
 ### Fixed
