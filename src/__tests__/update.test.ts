@@ -176,13 +176,13 @@ describe('checkForUpdate', () => {
     mockedLoadState.mockResolvedValue({
       ...defaultState,
       lastUpdateCheck: recentCheck,
-      availableUpdate: '0.4.0',
+      availableUpdate: '99.0.0',
     });
 
     const result = await checkForUpdate();
 
     expect(result.available).toBe(true);
-    expect(result.latest).toBe('0.4.0');
+    expect(result.latest).toBe('99.0.0');
     expect(mockedExecSync).not.toHaveBeenCalled();
   });
 
@@ -195,7 +195,7 @@ describe('checkForUpdate', () => {
       lastUpdateCheck: oldCheck,
       availableUpdate: null,
     });
-    mockedExecSync.mockReturnValue('0.4.0\n');
+    mockedExecSync.mockReturnValue('99.0.0\n');
 
     const result = await checkForUpdate();
 
@@ -205,7 +205,7 @@ describe('checkForUpdate', () => {
       expect.any(Object),
     );
     expect(result.available).toBe(true);
-    expect(result.latest).toBe('0.4.0');
+    expect(result.latest).toBe('99.0.0');
   });
 
   // ─── Test #3: npm view timeout ────────────────────────

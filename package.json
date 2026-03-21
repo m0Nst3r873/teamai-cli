@@ -19,8 +19,11 @@
     "build": "tsup",
     "dev": "tsup --watch",
     "test": "vitest run",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
+    "release": "standard-version",
     "prepublishOnly": "npm run build"
   },
   "repository": {
@@ -49,6 +52,8 @@
   "devDependencies": {
     "@types/fs-extra": "^11.0.4",
     "@types/node": "^20.17.0",
+    "@vitest/coverage-v8": "^2.1.9",
+    "standard-version": "^9.5.0",
     "tsup": "^8.3.0",
     "typescript": "^5.7.0",
     "vitest": "^2.1.0"
