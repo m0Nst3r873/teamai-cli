@@ -3,7 +3,7 @@ import path from 'node:path';
 import { readUsageEvents, truncateUsageAfterReport } from './usage-tracker.js';
 import { aggregateUsage } from './stats.js';
 import { pushRepoDirectly, pullRepo } from './utils/git.js';
-import { writeFile, ensureDir } from './utils/fs.js';
+import { writeFile, readFileSafe, ensureDir } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import type { UserStats } from './types.js';
 
@@ -21,7 +21,10 @@ import type { UserStats } from './types.js';
 //  [read ~/.teamai/usage.jsonl] ──missing/empty?──▶ SKIP
 //      │
 //      ▼
-//  [aggregate to stats/<user>.yaml]
+//  [read existing stats/<user>.yaml + merge with new events]
+//      │
+//      ▼
+//  [write merged stats/<user>.yaml]
 //      │
 //      ▼
 //  [git add + commit + push (5s timeout)]
@@ -31,15 +34,49 @@ import type { UserStats } from './types.js';
 //
 
 /**
- * Aggregate local usage data into a YAML file for the team repo.
+ * Read existing stats YAML for a user, returning null if not found or invalid.
  */
-function buildUserStats(username: string, events: { name: string; count: number; lastUsed: Date }[]): UserStats {
+async function readExistingStats(statsPath: string): Promise<UserStats | null> {
+  try {
+    const content = await readFileSafe(statsPath);
+    if (!content) return null;
+    const parsed = YAML.parse(content) as UserStats;
+    if (parsed?.username && parsed?.skills) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Merge new aggregated events into existing stats.
+ * Counts are cumulative; lastUsed takes the more recent value.
+ */
+export function mergeStats(
+  existing: UserStats | null,
+  username: string,
+  newEvents: { name: string; count: number; lastUsed: Date }[],
+): UserStats {
   const skills: Record<string, { count: number; lastUsed: string }> = {};
-  for (const stat of events) {
-    skills[stat.name] = {
-      count: stat.count,
-      lastUsed: stat.lastUsed.toISOString(),
-    };
+
+  if (existing?.skills) {
+    for (const [name, data] of Object.entries(existing.skills)) {
+      skills[name] = { count: data.count, lastUsed: data.lastUsed };
+    }
+  }
+
+  for (const stat of newEvents) {
+    const prev = skills[stat.name];
+    const newLastUsed = stat.lastUsed.toISOString();
+
+    if (prev) {
+      prev.count += stat.count;
+      if (newLastUsed > prev.lastUsed) {
+        prev.lastUsed = newLastUsed;
+      }
+    } else {
+      skills[stat.name] = { count: stat.count, lastUsed: newLastUsed };
+    }
   }
 
   return {
@@ -51,6 +88,7 @@ function buildUserStats(username: string, events: { name: string; count: number;
 
 /**
  * Auto-report usage data to team repo during pull.
+ * Merges new events with existing stats to preserve historical data.
  * Best-effort: silently fails on any error.
  * Timeout: 5 seconds max to avoid blocking session start.
  */
@@ -65,14 +103,16 @@ export async function reportUsageToTeam(
       return;
     }
 
-    const stats = aggregateUsage(events);
-    const userStats = buildUserStats(username, stats);
+    const newStats = aggregateUsage(events);
 
-    // Write stats/<user>.yaml to team repo
     const statsDir = path.join(repoPath, 'stats');
     await ensureDir(statsDir);
     const statsPath = path.join(statsDir, `${username}.yaml`);
-    await writeFile(statsPath, YAML.stringify(userStats));
+
+    const existing = await readExistingStats(statsPath);
+    const merged = mergeStats(existing, username, newStats);
+
+    await writeFile(statsPath, YAML.stringify(merged));
 
     // Pull latest, commit, and push with timeout
     const pushPromise = (async () => {

@@ -24,8 +24,10 @@ import {
   trackFromStdin,
   updateKnownSkills,
   readKnownSkills,
+  extractSkillName,
 } from '../usage-tracker.js';
 import { aggregateUsage } from '../stats.js';
+import { mergeStats } from '../team-push.js';
 import { evaluateSessionValue } from '../session-collector.js';
 import { calculateSkillHealth, scoreToStars, calculateTeamHealth } from '../skill-health.js';
 import { getRecommendations } from '../skill-recommend.js';
@@ -541,5 +543,123 @@ describe('getRecommendations', () => {
   it('returns empty for no team data', async () => {
     const recs = await getRecommendations([]);
     expect(recs).toEqual([]);
+  });
+});
+
+// ─── extractSkillName tests ────────────────────────────
+
+describe('extractSkillName', () => {
+  it('extracts from { skill: "name" }', () => {
+    expect(extractSkillName({ skill: 'code-review' })).toBe('code-review');
+  });
+
+  it('extracts from { name: "name" }', () => {
+    expect(extractSkillName({ name: 'tdd' })).toBe('tdd');
+  });
+
+  it('extracts from { skill_name: "name" }', () => {
+    expect(extractSkillName({ skill_name: 'plan-eng-review' })).toBe('plan-eng-review');
+  });
+
+  it('extracts from { command: "name" }', () => {
+    expect(extractSkillName({ command: 'code-review' })).toBe('code-review');
+  });
+
+  it('extracts skill directory name from SKILL.md path', () => {
+    expect(extractSkillName({ skill: '/root/.cursor/skills/tdd/SKILL.md' })).toBe('tdd');
+    expect(extractSkillName({ name: '/home/user/.claude/skills/plan-eng-review/SKILL.md' })).toBe('plan-eng-review');
+  });
+
+  it('extracts last segment from filesystem paths', () => {
+    expect(extractSkillName({ skill: '/root/.cursor/skills/tdd' })).toBe('tdd');
+    expect(extractSkillName({ skill: '~/skills/code-review' })).toBe('code-review');
+  });
+
+  it('handles JSON string input', () => {
+    expect(extractSkillName(JSON.stringify({ skill: 'tdd' }))).toBe('tdd');
+  });
+
+  it('returns null for missing/invalid values', () => {
+    expect(extractSkillName({})).toBeNull();
+    expect(extractSkillName({ other: 'value' })).toBeNull();
+    expect(extractSkillName({ skill: 123 } as unknown as Record<string, unknown>)).toBeNull();
+    expect(extractSkillName({ skill: '' })).toBeNull();
+  });
+
+  it('returns null for malformed JSON string input', () => {
+    expect(extractSkillName('not-json')).toBeNull();
+  });
+});
+
+// ─── mergeStats tests ──────────────────────────────────
+
+describe('mergeStats', () => {
+  it('creates fresh stats when no existing data', () => {
+    const newEvents = [
+      { name: 'tdd', count: 3, lastUsed: new Date('2026-03-20T10:00:00Z') },
+      { name: 'code-review', count: 1, lastUsed: new Date('2026-03-20T11:00:00Z') },
+    ];
+
+    const result = mergeStats(null, 'alice', newEvents);
+    expect(result.username).toBe('alice');
+    expect(result.skills.tdd.count).toBe(3);
+    expect(result.skills['code-review'].count).toBe(1);
+  });
+
+  it('accumulates counts when merging with existing stats', () => {
+    const existing: UserStats = {
+      username: 'alice',
+      updatedAt: '2026-03-19T10:00:00Z',
+      skills: {
+        tdd: { count: 10, lastUsed: '2026-03-18T10:00:00Z' },
+        'code-review': { count: 5, lastUsed: '2026-03-17T10:00:00Z' },
+      },
+    };
+
+    const newEvents = [
+      { name: 'tdd', count: 3, lastUsed: new Date('2026-03-20T10:00:00Z') },
+      { name: 'plan-eng-review', count: 1, lastUsed: new Date('2026-03-20T11:00:00Z') },
+    ];
+
+    const result = mergeStats(existing, 'alice', newEvents);
+
+    expect(result.skills.tdd.count).toBe(13);
+    expect(result.skills.tdd.lastUsed).toBe('2026-03-20T10:00:00.000Z');
+
+    expect(result.skills['code-review'].count).toBe(5);
+    expect(result.skills['code-review'].lastUsed).toBe('2026-03-17T10:00:00Z');
+
+    expect(result.skills['plan-eng-review'].count).toBe(1);
+  });
+
+  it('keeps existing lastUsed when it is more recent', () => {
+    const existing: UserStats = {
+      username: 'alice',
+      updatedAt: '2026-03-19T10:00:00Z',
+      skills: {
+        tdd: { count: 10, lastUsed: '2026-03-25T10:00:00Z' },
+      },
+    };
+
+    const newEvents = [
+      { name: 'tdd', count: 2, lastUsed: new Date('2026-03-20T10:00:00Z') },
+    ];
+
+    const result = mergeStats(existing, 'alice', newEvents);
+    expect(result.skills.tdd.count).toBe(12);
+    expect(result.skills.tdd.lastUsed).toBe('2026-03-25T10:00:00Z');
+  });
+
+  it('handles empty new events with existing stats', () => {
+    const existing: UserStats = {
+      username: 'alice',
+      updatedAt: '2026-03-19T10:00:00Z',
+      skills: {
+        tdd: { count: 10, lastUsed: '2026-03-18T10:00:00Z' },
+      },
+    };
+
+    const result = mergeStats(existing, 'alice', []);
+    expect(result.skills.tdd.count).toBe(10);
   });
 });

@@ -1,5 +1,9 @@
+import YAML from 'yaml';
+import path from 'node:path';
 import { readUsageEvents } from './usage-tracker.js';
-import type { UsageEvent } from './types.js';
+import { readFileSafe } from './utils/fs.js';
+import { loadLocalConfig } from './config.js';
+import type { UsageEvent, UserStats } from './types.js';
 
 interface SkillStats {
   name: string;
@@ -36,6 +40,56 @@ export function aggregateUsage(events: UsageEvent[]): SkillStats[] {
 }
 
 /**
+ * Read the user's reported stats from the team repo.
+ * Returns null if not found.
+ */
+async function loadReportedStats(): Promise<UserStats | null> {
+  try {
+    const config = await loadLocalConfig();
+    if (!config) return null;
+    const statsPath = path.join(config.repo.localPath, 'stats', `${config.username}.yaml`);
+    const content = await readFileSafe(statsPath);
+    if (!content) return null;
+    const parsed = YAML.parse(content) as UserStats;
+    if (parsed?.username && parsed?.skills) return parsed;
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Merge local unreported events with reported team stats into a unified view.
+ */
+function mergeLocalAndReported(localStats: SkillStats[], reported: UserStats | null): SkillStats[] {
+  const map = new Map<string, SkillStats>();
+
+  if (reported?.skills) {
+    for (const [name, data] of Object.entries(reported.skills)) {
+      map.set(name, {
+        name,
+        count: data.count,
+        lastUsed: new Date(data.lastUsed),
+      });
+    }
+  }
+
+  for (const stat of localStats) {
+    const existing = map.get(stat.name);
+    if (existing) {
+      existing.count += stat.count;
+      if (stat.lastUsed > existing.lastUsed) {
+        existing.lastUsed = stat.lastUsed;
+      }
+    } else {
+      map.set(stat.name, { ...stat });
+    }
+  }
+
+  return Array.from(map.values()).sort((a, b) => b.count - a.count);
+}
+
+/**
  * Format relative time for display (e.g., "2h ago", "yesterday").
  */
 function formatRelativeTime(date: Date): string {
@@ -54,24 +108,26 @@ function formatRelativeTime(date: Date): string {
 }
 
 /**
- * CLI: Show local skill usage statistics.
+ * CLI: Show skill usage statistics.
+ * Merges local unreported events with reported team stats for a complete view.
  */
 export async function showStats(): Promise<void> {
   const events = await readUsageEvents();
+  const localStats = aggregateUsage(events);
+  const reported = await loadReportedStats();
 
-  if (events.length === 0) {
+  const stats = mergeLocalAndReported(localStats, reported);
+
+  if (stats.length === 0) {
     console.log('No skill usage data yet.');
     console.log('Usage tracking starts automatically via PostToolUse hook.');
     return;
   }
 
-  const stats = aggregateUsage(events);
-
   console.log('');
   console.log('Skill Usage Statistics:');
   console.log('');
 
-  // Calculate column widths
   const maxNameLen = Math.max(...stats.map((s) => s.name.length), 4);
   const maxCountLen = Math.max(...stats.map((s) => String(s.count).length), 4);
 
@@ -82,6 +138,10 @@ export async function showStats(): Promise<void> {
     console.log(`  ${name}  ${count} uses   last: ${recency}`);
   }
 
+  const totalEvents = stats.reduce((sum, s) => sum + s.count, 0);
   console.log('');
-  console.log(`Total: ${events.length} events across ${stats.length} skill(s)`);
+  console.log(`Total: ${totalEvents} events across ${stats.length} skill(s)`);
+  if (events.length > 0) {
+    console.log(`  (${events.length} pending upload)`);
+  }
 }

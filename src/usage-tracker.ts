@@ -46,14 +46,34 @@ function getKnownSkillsPath(): string {
 /**
  * Extract skill name from the Skill tool's input.
  * Accepts either a JSON string or a parsed object.
+ *
+ * Handles multiple field names that different AI tool providers may use:
+ *   - skill, name (original)
+ *   - skill_name (Claude Code variant)
+ *   - command (some providers wrap skill invocation)
+ *
+ * If the value looks like a file path (e.g. "/root/.cursor/skills/tdd/SKILL.md"),
+ * extracts the skill directory name as the skill identifier.
  */
-function extractSkillName(toolInput: string | Record<string, unknown>): string | null {
+export function extractSkillName(toolInput: string | Record<string, unknown>): string | null {
   try {
     const parsed = typeof toolInput === 'string' ? JSON.parse(toolInput) : toolInput;
-    const skill = parsed?.skill ?? parsed?.name ?? null;
-    if (typeof skill !== 'string') return null;
-    // The skill field may contain a qualified name like "pkg:skill-name"
-    return skill.trim() || null;
+    const raw: unknown = parsed?.skill ?? parsed?.name ?? parsed?.skill_name ?? parsed?.command ?? null;
+    if (typeof raw !== 'string') return null;
+    const trimmed = raw.trim();
+    if (!trimmed) return null;
+
+    // If value looks like a path to SKILL.md, extract the parent directory name
+    const skillMdMatch = trimmed.match(/\/([^/]+)\/SKILL\.md$/i);
+    if (skillMdMatch) return skillMdMatch[1];
+
+    // If value looks like a filesystem path, extract the last segment
+    if (trimmed.startsWith('/') || trimmed.startsWith('~')) {
+      const segments = trimmed.split('/').filter(Boolean);
+      return segments[segments.length - 1] || null;
+    }
+
+    return trimmed;
   } catch {
     return null;
   }
