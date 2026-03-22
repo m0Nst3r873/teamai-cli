@@ -1,5 +1,22 @@
 # Changelog
 
+## [0.4.4] - 2026-03-22
+
+### Added
+- **Cursor Skill 使用追踪**：通过 postToolUse hook (matcher: `Read`) 检测 SKILL.md 文件读取，自动记录 Cursor 用户的 skill 使用到 `usage.jsonl`
+  - `teamai init` 自动注入 postToolUse hook 到 Cursor 的 `hooks.json`
+  - `UsageEvent.tool` 字段区分 `cursor` / `claude`，支持按工具来源分析使用数据
+  - 适配 Cursor 原生 STDIN 格式（`file_path` 字段），经实际 hook 触发验证
+- **Hook 自动更新**：stop hook 从 `teamai update --check` 改为 `teamai update`，支持根据 updatePolicy 自动安装更新（不再仅打印提示）
+  - `doUpdate` 通过 TTY 检测区分 hook/手动模式，非 TTY 环境下 prompt 策略自动降级为提示
+
+### Tests
+- 新增 7 个测试：Cursor Read + SKILL.md 路径追踪、file_path 原生格式、非 SKILL.md 忽略、工具来源标记验证
+- 全量 294 测试通过，零回归
+
+### For Existing Users
+存量 Cursor 用户需重新运行 `teamai init` 以注入 postToolUse hook。Claude Code 用户无需操作，hook 会在下次会话结束时自动更新。
+
 ## [0.4.3] - 2026-03-22
 
 ### Fixed
