@@ -1,6 +1,17 @@
 # Changelog
 
-# Changelog
+## [0.4.3] - 2026-03-22
+
+### Fixed
+- **Stats 数据每次上报后丢失（Critical）**：`reportUsageToTeam` 每次 `teamai pull` 时直接覆写 `stats/<user>.yaml`，不与历史数据合并，导致之前累积的统计全部丢失。修复后先读取已有 stats 文件，count 累加、lastUsed 取更新值
+- **`teamai stats` 在 pull 后显示空数据**：`showStats` 只读 `usage.jsonl`（每次成功上报后被 truncate 清空），导致用户看到 "No skill usage data yet"。修复后同时读取本地 `usage.jsonl`（未上报事件）+ 团队仓库 `stats/<user>.yaml`（已上报历史），合并展示完整统计
+- **Skill 名提取字段兼容性不足**：`extractSkillName` 仅检查 `skill`/`name` 字段，遗漏部分 AI 工具的 hook 格式
+  - 新增 `skill_name`、`command` 字段支持
+  - 支持从 SKILL.md 文件路径（如 `/root/.cursor/skills/tdd/SKILL.md`）中自动提取 skill 目录名
+
+### Tests
+- 新增 17 个测试用例：mergeStats 合并逻辑（4）、extractSkillName 多格式提取（9）、边界条件（4）
+- 全量 288 测试通过，零回归
 
 ## [0.4.2] - 2026-03-20
 
