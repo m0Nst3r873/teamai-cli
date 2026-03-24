@@ -170,6 +170,17 @@ program
   });
 
 program
+  .command('track-slash')
+  .description('Track a slash command usage (called by UserPromptSubmit hook)')
+  .option('--stdin', 'Read hook data from STDIN')
+  .action(async (cmdOpts) => {
+    if (cmdOpts.stdin) {
+      const { trackSlashCommand } = await import('./usage-tracker.js');
+      await trackSlashCommand();
+    }
+  });
+
+program
   .command('stats')
   .description('Show local skill usage statistics')
   .action(async () => {

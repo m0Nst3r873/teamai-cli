@@ -21,6 +21,9 @@ import type { UserStats } from './types.js';
 //  [read ~/.teamai/usage.jsonl] ──missing/empty?──▶ SKIP
 //      │
 //      ▼
+//  [git pull latest] ── get freshest remote stats ──
+//      │
+//      ▼
 //  [read existing stats/<user>.yaml + merge with new events]
 //      │
 //      ▼
@@ -109,20 +112,22 @@ export async function reportUsageToTeam(
     await ensureDir(statsDir);
     const statsPath = path.join(statsDir, `${username}.yaml`);
 
+    // Pull first to get the freshest remote stats before merging
+    // (prevents race condition where concurrent push overwrites our merge)
+    await pullRepo(repoPath);
+
+    // See also: stats.ts mergeLocalAndReported() — same merge logic for display
     const existing = await readExistingStats(statsPath);
     const merged = mergeStats(existing, username, newStats);
 
     await writeFile(statsPath, YAML.stringify(merged));
 
-    // Pull latest, commit, and push with timeout
-    const pushPromise = (async () => {
-      await pullRepo(repoPath);
-      await pushRepoDirectly(
-        repoPath,
-        `[teamai] Update usage stats for ${username}`,
-        [`stats/${username}.yaml`],
-      );
-    })();
+    // Commit and push with timeout
+    const pushPromise = pushRepoDirectly(
+      repoPath,
+      `[teamai] Update usage stats for ${username}`,
+      [`stats/${username}.yaml`],
+    );
 
     const timeoutPromise = new Promise<never>((_, reject) =>
       setTimeout(() => reject(new Error('Auto-report timeout (5s)')), 5000),

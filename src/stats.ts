@@ -60,6 +60,7 @@ async function loadReportedStats(): Promise<UserStats | null> {
 
 /**
  * Merge local unreported events with reported team stats into a unified view.
+ * See also: team-push.ts mergeStats() — same merge logic for auto-report.
  */
 function mergeLocalAndReported(localStats: SkillStats[], reported: UserStats | null): SkillStats[] {
   const map = new Map<string, SkillStats>();

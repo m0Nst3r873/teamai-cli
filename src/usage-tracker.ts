@@ -40,6 +40,25 @@ function getKnownSkillsPath(): string {
 //                       ▼
 //               updateKnownSkills(skill) → known-skills.json
 //
+//  ─── Slash command tracking (Claude Code only) ────────
+//
+//  UserPromptSubmit hook (matcher: "*")
+//      │
+//      ▼
+//  { prompt: "/plan-eng-review args..." }
+//      │
+//      ▼
+//  teamai track-slash --stdin
+//      │
+//      ▼
+//  [starts with "/"?] ──No──▶ exit(0)
+//      │Yes
+//      ▼
+//  [extract & validate skill name after "/"]
+//      │
+//      ▼
+//  appendFile(usage.jsonl) + updateKnownSkills()
+//
 
 /**
  * Extract skill name from the Skill tool's input.
@@ -307,6 +326,59 @@ export async function trackFromStdin(): Promise<void> {
     skill: skillName,
     timestamp: new Date().toISOString(),
     tool: toolSource,
+  };
+
+  await appendUsageEvent(event);
+  await updateKnownSkills(skillName);
+}
+
+/**
+ * Handle the `teamai track-slash --stdin` mode.
+ * Reads UserPromptSubmit hook JSON from STDIN and tracks slash commands.
+ *
+ * STDIN JSON format (Claude Code UserPromptSubmit):
+ *   { prompt: "/plan-eng-review args...", session_id: "...", hook_event_name: "UserPromptSubmit" }
+ *
+ * Extracts the first word after "/" as the skill name.
+ */
+export async function trackSlashCommand(): Promise<void> {
+  const raw = await readStdin();
+  if (!raw.trim()) {
+    log.debug('No STDIN data for slash tracking');
+    return;
+  }
+
+  let hookData: { prompt?: string };
+  try {
+    hookData = JSON.parse(raw);
+  } catch {
+    log.debug('Failed to parse slash command STDIN JSON');
+    return;
+  }
+
+  const prompt = hookData.prompt;
+  if (typeof prompt !== 'string' || !prompt.startsWith('/')) {
+    return;
+  }
+
+  // Extract skill name: first word after "/" (e.g. "/plan-eng-review args" → "plan-eng-review")
+  const match = prompt.match(/^\/([a-zA-Z0-9_\-:.]+)/);
+  if (!match) {
+    log.debug('Could not extract skill name from slash command');
+    return;
+  }
+
+  const skillName = match[1];
+
+  if (!isValidSkillName(skillName)) {
+    log.debug(`Invalid slash skill name rejected: ${skillName.slice(0, 50)}`);
+    return;
+  }
+
+  const event: UsageEvent = {
+    skill: skillName,
+    timestamp: new Date().toISOString(),
+    tool: 'claude',
   };
 
   await appendUsageEvent(event);
