@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file. See [standa
 
 ## [0.5.0](https://git.woa.com/teamai/teamai-cli/compare/v0.4.5...v0.5.0) (2026-03-25)
 
+### 🚀 AI Coding Session Dashboard (Phase 1)
+
+新增 `teamai dashboard` 命令，在浏览器中实时展示所有 AI coding session 的状态。解决多窗口 Alt+Tab 切换的痛点。
+
+**新命令：**
+- `teamai dashboard` — 启动本地 Web UI（默认 localhost:3721），展示 session 状态卡片
+- `teamai dashboard -p <port>` — 自定义端口
+- `teamai dashboard-report --stdin --tool <name>` — hook 内部使用，上报 session 事件
+
+**Dashboard 功能：**
+- 🟢🟡🔴⚪ 状态灯：running / waiting / error / idle
+- Session 卡片展示：工作目录 (cwd)、首个 prompt 摘要、最后使用工具、活动时间
+- SSE 实时推送，延迟 < 3 秒
+- Session 识别：session_id 优先 + PID+cwd fallback
+- 自动清理：Stop hook + 5 分钟 idle 超时 + 30 分钟移除
+- JSONL 事件日志 + 超过 10,000 行自动 compact
+- 暗色主题 Web UI，零新依赖（Node.js 内置 http 模块）
+
+**Hook 变更：**
+- 新增 4 个独立 dashboard hooks（SessionStart / PostToolUse / UserPromptSubmit / Stop）
+- 与现有 usage tracking hooks 完全解耦，可独立开关
 
 ### Features
 
