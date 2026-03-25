@@ -79,6 +79,16 @@ function mockStdin(data: string): () => void {
   };
 }
 
+/**
+ * Helper: create a fake skill on disk so `skillExistsOnDisk()` finds it.
+ * Creates `~/.claude/skills/<name>/SKILL.md` under the test tmpDir.
+ */
+async function createFakeSkill(name: string): Promise<void> {
+  const skillDir = path.join(tmpDir, '.claude', 'skills', name);
+  await fse.ensureDir(skillDir);
+  await fse.writeFile(path.join(skillDir, 'SKILL.md'), `# ${name}\nFake skill for testing.\n`);
+}
+
 // ─── usage-tracker tests ───────────────────────────────
 
 describe('isValidSkillName', () => {
@@ -843,6 +853,7 @@ describe('mergeStats', () => {
 
 describe('trackSlashCommand', () => {
   it('tracks a valid slash command', async () => {
+    await createFakeSkill('plan-eng-review');
     const hookData = JSON.stringify({
       prompt: '/plan-eng-review some args',
       session_id: 'sess-456',
@@ -862,6 +873,7 @@ describe('trackSlashCommand', () => {
   });
 
   it('tracks slash command with colon-namespaced skill', async () => {
+    await createFakeSkill('gstack:tdd');
     const hookData = JSON.stringify({
       prompt: '/gstack:tdd',
       session_id: 'sess-789',
@@ -934,7 +946,25 @@ describe('trackSlashCommand', () => {
     expect(events).toEqual([]);
   });
 
+  it('ignores slash commands for non-existent skills', async () => {
+    // "/data" is not a real skill — should NOT be tracked
+    const hookData = JSON.stringify({
+      prompt: '/data',
+      session_id: 'sess-phantom',
+    });
+    const restore = mockStdin(hookData);
+    try {
+      await trackSlashCommand();
+    } finally {
+      restore();
+    }
+
+    const events = await readUsageEvents();
+    expect(events).toEqual([]);
+  });
+
   it('updates known-skills.json on successful slash track', async () => {
+    await createFakeSkill('tdd');
     const hookData = JSON.stringify({
       prompt: '/tdd',
     });
@@ -950,6 +980,7 @@ describe('trackSlashCommand', () => {
   });
 
   it('uses --tool argument as tool source', async () => {
+    await createFakeSkill('plan-eng-review');
     const hookData = JSON.stringify({
       prompt: '/plan-eng-review args',
     });
@@ -966,6 +997,7 @@ describe('trackSlashCommand', () => {
   });
 
   it('defaults to claude when no --tool argument (backward compat)', async () => {
+    await createFakeSkill('tdd');
     const hookData = JSON.stringify({
       prompt: '/tdd',
     });

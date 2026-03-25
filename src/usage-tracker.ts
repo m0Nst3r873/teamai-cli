@@ -5,7 +5,7 @@ import {
   SKILL_NAME_REGEX,
   type UsageEvent,
 } from './types.js';
-import { ensureDir, readJson, writeJson } from './utils/fs.js';
+import { ensureDir, readJson, writeJson, pathExists } from './utils/fs.js';
 
 /** Get the usage JSONL path (evaluated at call time to respect HOME changes in tests). */
 function getUsagePath(): string {
@@ -103,6 +103,34 @@ export function extractSkillName(toolInput: string | Record<string, unknown>): s
  */
 export function isValidSkillName(name: string): boolean {
   return SKILL_NAME_REGEX.test(name);
+}
+
+/**
+ * Well-known local skill directories to check for skill existence.
+ * Ordered by likelihood of being present.
+ */
+const SKILL_DIRS = [
+  '.claude/skills',
+  '.claude-internal/skills',
+  '.cursor/skills',
+  '.codebuddy/skills',
+  '.codex/skills',
+  '.openclaw/skills',
+];
+
+/**
+ * Check whether a skill actually exists on disk (has a SKILL.md in any tool's skills directory).
+ * This prevents tracking phantom skills from typos or path inputs like "/data".
+ *
+ * Performance: Checks at most 6 directories with a single stat() each — sub-millisecond.
+ */
+export async function skillExistsOnDisk(skillName: string): Promise<boolean> {
+  const home = process.env.HOME ?? '';
+  for (const dir of SKILL_DIRS) {
+    const skillMd = path.join(home, dir, skillName, 'SKILL.md');
+    if (await pathExists(skillMd)) return true;
+  }
+  return false;
 }
 
 /**
@@ -380,6 +408,13 @@ export async function trackSlashCommand(toolArg?: string): Promise<void> {
 
   if (!isValidSkillName(skillName)) {
     log.debug(`Invalid slash skill name rejected: ${skillName.slice(0, 50)}`);
+    return;
+  }
+
+  // Verify the skill actually exists on disk to avoid tracking phantom skills
+  // (e.g. user typing "/data" which is not a real skill)
+  if (!await skillExistsOnDisk(skillName)) {
+    log.debug(`Slash command "/${skillName}" is not a known skill — skipping tracking`);
     return;
   }
 
