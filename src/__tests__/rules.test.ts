@@ -398,3 +398,158 @@ describe('RulesHandler.scanTeamForPull — subdirectory support', () => {
     expect(item!.relativePath).toBe('rules/golang/errors.md');
   });
 });
+
+describe('RulesHandler.pullAllRules — stale file cleanup', () => {
+  let tmpDir: string;
+  let homeDir: string;
+  let handler: RulesHandler;
+  let teamConfig: TeamaiConfig;
+  let localConfig: LocalConfig;
+
+  beforeEach(async () => {
+    tmpDir = await fse.mkdtemp(path.join(os.tmpdir(), 'teamai-rules-stale-'));
+    homeDir = path.join(tmpDir, 'home');
+
+    const repoPath = path.join(tmpDir, 'team-repo');
+    await fse.ensureDir(path.join(repoPath, 'rules'));
+    await fse.ensureDir(path.join(homeDir, '.claude', 'rules'));
+    // Create CLAUDE.md so pullAllRules can update it
+    await fse.writeFile(path.join(homeDir, '.claude', 'CLAUDE.md'), '');
+
+    vi.stubEnv('HOME', homeDir);
+
+    handler = new RulesHandler();
+
+    teamConfig = {
+      team: 'test',
+      description: '',
+      repo: 'https://git.woa.com/test/repo.git',
+      sharing: { skills: {}, rules: { enforced: [] }, docs: { localDir: '' }, env: { injectShellProfile: true } },
+      toolPaths: {
+        claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md' },
+      },
+    };
+
+    localConfig = {
+      repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
+      username: 'testuser',
+      updatePolicy: 'auto',
+    };
+  });
+
+  afterEach(async () => {
+    vi.unstubAllEnvs();
+    await fse.remove(tmpDir);
+  });
+
+  it('should remove local rule files that no longer exist in team repo', async () => {
+    const teamRulesDir = path.join(localConfig.repo.localPath, 'rules');
+
+    // Team repo only has tencent_standard.md
+    await fse.writeFile(path.join(teamRulesDir, 'tencent_standard.md'), 'standard content');
+
+    // Local has tencent_standard.md + stale files
+    const localRulesDir = path.join(homeDir, '.claude/rules');
+    await fse.writeFile(path.join(localRulesDir, 'tencent_standard.md'), 'old standard content');
+    await fse.writeFile(path.join(localRulesDir, 'coding-style.md'), 'stale content');
+    await fse.writeFile(path.join(localRulesDir, 'hooks.md'), 'stale content');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+
+    // tencent_standard.md should be updated
+    expect(await fse.pathExists(path.join(localRulesDir, 'tencent_standard.md'))).toBe(true);
+    const content = await fse.readFile(path.join(localRulesDir, 'tencent_standard.md'), 'utf-8');
+    expect(content).toBe('standard content');
+
+    // Stale files should be removed
+    expect(await fse.pathExists(path.join(localRulesDir, 'coding-style.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(localRulesDir, 'hooks.md'))).toBe(false);
+  });
+
+  it('should remove stale files in subdirectories', async () => {
+    const teamRulesDir = path.join(localConfig.repo.localPath, 'rules');
+
+    // Team repo has python/tencent_standard.md only
+    await fse.ensureDir(path.join(teamRulesDir, 'python'));
+    await fse.writeFile(path.join(teamRulesDir, 'python/tencent_standard.md'), 'standard');
+
+    // Local has extra files in python/
+    const localRulesDir = path.join(homeDir, '.claude/rules');
+    await fse.ensureDir(path.join(localRulesDir, 'python'));
+    await fse.writeFile(path.join(localRulesDir, 'python/tencent_standard.md'), 'old');
+    await fse.writeFile(path.join(localRulesDir, 'python/coding-style.md'), 'stale');
+    await fse.writeFile(path.join(localRulesDir, 'python/security.md'), 'stale');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+
+    expect(await fse.pathExists(path.join(localRulesDir, 'python/tencent_standard.md'))).toBe(true);
+    expect(await fse.pathExists(path.join(localRulesDir, 'python/coding-style.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(localRulesDir, 'python/security.md'))).toBe(false);
+  });
+
+  it('should remove empty subdirectories after cleaning stale files', async () => {
+    const teamRulesDir = path.join(localConfig.repo.localPath, 'rules');
+
+    // Team repo has only common/agents.md
+    await fse.ensureDir(path.join(teamRulesDir, 'common'));
+    await fse.writeFile(path.join(teamRulesDir, 'common/agents.md'), 'agents');
+
+    // Local has a python/ subdir that should be cleaned entirely
+    const localRulesDir = path.join(homeDir, '.claude/rules');
+    await fse.ensureDir(path.join(localRulesDir, 'common'));
+    await fse.writeFile(path.join(localRulesDir, 'common/agents.md'), 'old agents');
+    await fse.ensureDir(path.join(localRulesDir, 'python'));
+    await fse.writeFile(path.join(localRulesDir, 'python/old-rule.md'), 'stale');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+
+    expect(await fse.pathExists(path.join(localRulesDir, 'common/agents.md'))).toBe(true);
+    expect(await fse.pathExists(path.join(localRulesDir, 'python/old-rule.md'))).toBe(false);
+    // The empty python/ directory should also be removed
+    expect(await fse.pathExists(path.join(localRulesDir, 'python'))).toBe(false);
+  });
+
+  it('should clean stale files across multiple tool directories', async () => {
+    // Add a second tool
+    await fse.ensureDir(path.join(homeDir, '.claude-internal', 'rules'));
+    teamConfig.toolPaths['claude-internal'] = {
+      skills: '.claude-internal/skills',
+      rules: '.claude-internal/rules',
+      claudemd: '.claude-internal/CLAUDE.md',
+    };
+    await fse.writeFile(path.join(homeDir, '.claude-internal', 'CLAUDE.md'), '');
+
+    const teamRulesDir = path.join(localConfig.repo.localPath, 'rules');
+    await fse.writeFile(path.join(teamRulesDir, 'keep.md'), 'keep this');
+
+    // Both tool dirs have stale files
+    await fse.writeFile(path.join(homeDir, '.claude/rules', 'keep.md'), 'old');
+    await fse.writeFile(path.join(homeDir, '.claude/rules', 'stale.md'), 'stale');
+    await fse.writeFile(path.join(homeDir, '.claude-internal/rules', 'keep.md'), 'old');
+    await fse.writeFile(path.join(homeDir, '.claude-internal/rules', 'stale.md'), 'stale');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+
+    // Both tool dirs should have stale.md removed
+    expect(await fse.pathExists(path.join(homeDir, '.claude/rules', 'stale.md'))).toBe(false);
+    expect(await fse.pathExists(path.join(homeDir, '.claude-internal/rules', 'stale.md'))).toBe(false);
+
+    // keep.md should exist in both
+    expect(await fse.pathExists(path.join(homeDir, '.claude/rules', 'keep.md'))).toBe(true);
+    expect(await fse.pathExists(path.join(homeDir, '.claude-internal/rules', 'keep.md'))).toBe(true);
+  });
+
+  it('should not remove non-.md files during cleanup', async () => {
+    const teamRulesDir = path.join(localConfig.repo.localPath, 'rules');
+    await fse.writeFile(path.join(teamRulesDir, 'only-rule.md'), 'content');
+
+    const localRulesDir = path.join(homeDir, '.claude/rules');
+    await fse.writeFile(path.join(localRulesDir, 'only-rule.md'), 'old');
+    await fse.writeFile(path.join(localRulesDir, 'some-config.json'), '{}');
+
+    await handler.pullAllRules(teamConfig, localConfig);
+
+    // .json file should NOT be removed
+    expect(await fse.pathExists(path.join(localRulesDir, 'some-config.json'))).toBe(true);
+  });
+});

@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { ResourceHandler } from './base.js';
 import type { ResourceItem, ResourceItemStatus, TeamaiConfig, LocalConfig } from '../types.js';
-import { listFilesRecursive, pathExists, readFileSafe, writeFile, copyFile, ensureDir, remove, fileContentEqual, getFileMtime } from '../utils/fs.js';
+import { listFilesRecursive, pathExists, readFileSafe, writeFile, copyFile, ensureDir, remove, fileContentEqual, getFileMtime, listDirs } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 import { TEAMAI_RULES_START, TEAMAI_RULES_END } from '../types.js';
 
@@ -186,8 +186,31 @@ export class RulesHandler extends ResourceHandler {
       await this.pullItem(rule, teamConfig, localConfig);
     }
 
-    // 2. Update CLAUDE.md with references only
+    // 1.5. Clean up stale local rule files not present in team repo
+    const teamRuleFiles = new Set(rules.map((r) => `${r.name}.md`));
     const home = process.env.HOME ?? '';
+    for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
+      if (!toolPath.rules) continue;
+      if (!await ResourceHandler.isToolInstalled(toolPath.rules)) continue;
+
+      const destDir = path.join(home, toolPath.rules);
+      if (!await pathExists(destDir)) continue;
+
+      const localFiles = await listFilesRecursive(destDir);
+      for (const localFile of localFiles) {
+        if (!localFile.endsWith('.md')) continue;
+        if (!teamRuleFiles.has(localFile)) {
+          const fullPath = path.join(destDir, localFile);
+          await remove(fullPath);
+          log.debug(`Removed stale rule ${localFile} from ${tool}`);
+        }
+      }
+
+      // Clean up empty subdirectories
+      await this.removeEmptyDirs(destDir);
+    }
+
+    // 2. Update CLAUDE.md with references only
     for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
       if (!toolPath.claudemd || !toolPath.rules) continue;
 
@@ -233,6 +256,24 @@ export class RulesHandler extends ResourceHandler {
         log.debug(`Updated rules references in ${tool} CLAUDE.md`);
       } catch (e) {
         log.warn(`Failed to update ${tool} CLAUDE.md: ${(e as Error).message}`);
+      }
+    }
+  }
+
+  /**
+   * Recursively remove empty subdirectories under a given directory.
+   */
+  private async removeEmptyDirs(dir: string): Promise<void> {
+    if (!await pathExists(dir)) return;
+    const subdirs = await listDirs(dir);
+    for (const sub of subdirs) {
+      const subPath = path.join(dir, sub);
+      await this.removeEmptyDirs(subPath);
+      // After cleaning children, check if this dir is now empty
+      const remaining = await listFilesRecursive(subPath);
+      const remainingDirs = await listDirs(subPath);
+      if (remaining.length === 0 && remainingDirs.length === 0) {
+        await remove(subPath);
       }
     }
   }
