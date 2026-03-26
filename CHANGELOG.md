@@ -2,13 +2,17 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
-### [0.5.2](https://git.woa.com/teamai/teamai-cli/compare/v0.5.0...v0.5.2) (2026-03-26)
-
+### [0.5.2](https://git.woa.com/teamai/teamai-cli/compare/v0.5.1...v0.5.2) (2026-03-26)
 
 ### Bug Fixes
 
 * clean up stale local rule files during pull (merge request !71) ([30a4662](https://git.woa.com/teamai/teamai-cli/commit/30a466271394b2a7b2ca3d229aada3ea8cb57f17))
-* skip tracking slash commands for non-existent skills (merge request !70) ([8eb2778](https://git.woa.com/teamai/teamai-cli/commit/8eb2778a58e4715b5aab56462b5c24634a1cd16f))
+  - `teamai pull` 现在会自动清理本地已从 team repo 删除的 rule 文件
+  - 之前从 team repo 删除 rule 后，本地 `~/.claude/rules/` 等目录会残留过期副本
+  - 清理逻辑：对比本地 `.md` 文件与 team repo，删除上游已不存在的文件
+  - 自动清理删除后留下的空子目录
+  - 仅影响 `.md` 文件，其他文件类型不受影响
+  - 新增 5 个测试用例覆盖各种清理场景
 
 ## [0.5.1](https://git.woa.com/teamai/teamai-cli/compare/v0.5.0...v0.5.1) (2026-03-25)
 
