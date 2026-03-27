@@ -239,5 +239,6 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
   }
 
   log.success('teamai initialized successfully!');
-  log.info('Run `teamai pull` to sync team resources, or `teamai status` to check.');
+  log.info('Skills, rules, env and docs will auto-sync on each session start (via hooks).');
+  log.info('Run `teamai status` to check current config.');
 }

@@ -229,7 +229,7 @@ export function getDashboardHtml(port: number): string {
           <div class="empty-state">
             <h2>No active sessions</h2>
             <p>Start a Claude Code session and it will appear here automatically.
-            Make sure <code>teamai pull</code> has been run to inject dashboard hooks.</p>
+            Dashboard hooks are injected automatically. Try restarting your session.</p>
           </div>\`;
         return;
       }
