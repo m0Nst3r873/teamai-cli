@@ -28,7 +28,6 @@ teamai init --repo yourteam/yourproject
 | `teamai init` | 初始化（自动安装 gf CLI、OAuth 登录、关联仓库、注册成员、配置 reviewers、注入 hooks） |
 | `teamai push [--all]` | 推送本地新资源到独立分支并创建 Merge Request |
 | `teamai pull [--silent]` | 拉取团队资源并注入到本地 AI 工具 |
-| `teamai sync` | 双向同步（push + pull） |
 | `teamai status` | 查看本地 vs 团队仓库差异 |
 | `teamai list [type]` | 列出资源（skills\|rules\|docs） |
 | `teamai members` | 列出已注册的团队成员 |
@@ -55,13 +54,13 @@ teamai init --repo yourteam/yourproject
                   │         ▲
                   │         │ reviewer 审批合并 MR
                   ▼
-             SessionStart hook → teamai pull --silent
+             SessionStart hook → teamai pull
              自动拉取到所有成员本地
 ```
 
 - `teamai push` 会创建独立分支（`teamai/push/<user>/<timestamp>`），推送后自动创建 Merge Request 并指派 reviewers
 - `teamai init` 初始化时可配置默认 reviewers（记录在 `teamai.yaml` 的 `reviewers` 字段）
-- `teamai init` 会自动注入 SessionStart hook，每次启动 AI 工具会话时自动拉取团队最新内容（支持 Claude Code、Codex、Claude Code Internal、Cursor、CodeBuddy IDE）
+- `teamai init` 会自动注入与各工具格式对齐的 hooks（含 `sessionStart`、`stop`、`postToolUse`、`userPromptSubmit` 等），会话中会执行 `teamai pull`、`teamai update`、追踪与仪表盘等（支持 Claude Code、Codex、Claude Code Internal、Cursor、CodeBuddy IDE）
 - Skills 同步到 `~/.claude/skills/`、`~/.codex/skills/`、`~/.claude-internal/skills/`、`~/.cursor/skills/`、`~/.codebuddy/skills/`
 - Rules 同步到各工具的 rules 目录，并通过标记注释合并到 `CLAUDE.md`（支持 claude、claude-internal、codebuddy）
 - Docs 同步到 `~/.teamai/docs/`

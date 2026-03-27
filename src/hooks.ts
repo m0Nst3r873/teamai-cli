@@ -21,6 +21,17 @@ function getDashboardReportCommand(tool: string): string {
   return `bash -lc "teamai dashboard-report --stdin --tool ${tool}" 2>>~/.teamai/debug.log || true`;
 }
 
+/** Subcommands expected in each tool settings file (for `teamai doctor`). */
+export const TEAMAI_HOOK_SUBCOMMANDS = ['pull', 'update', 'track', 'track-slash', 'dashboard-report'] as const;
+
+/** Claude PascalCase event → Cursor camelCase event (for tests / docs). */
+export const CLAUDE_TO_CURSOR_EVENTS: Record<string, string> = {
+  SessionStart: 'sessionStart',
+  Stop: 'stop',
+  PostToolUse: 'postToolUse',
+  UserPromptSubmit: 'userPromptSubmit',
+};
+
 // ─── Claude Code / Claude Internal format (settings.json) ───
 
 interface HookEntry {
@@ -154,21 +165,27 @@ interface CursorHooksJson {
   hooks: Record<string, CursorHookEntry[]>;
 }
 
-const CURSOR_SESSION_START_HOOK: CursorHookEntry = {
-  command: TEAMAI_PULL_COMMAND,
-  timeout: 30,
-};
-
-const CURSOR_STOP_HOOK: CursorHookEntry = {
-  command: TEAMAI_UPDATE_COMMAND,
-  timeout: 90,
-};
-
-const CURSOR_POST_TOOL_USE_HOOK: CursorHookEntry = {
-  command: getTrackCommand('cursor'),
-  timeout: 10,
-  matcher: 'Read',
-};
+/** Build Cursor hooks.json entries aligned with Claude semantics (camelCase events, Skill matcher). */
+function buildCursorHooks(tool: string): Record<string, CursorHookEntry[]> {
+  return {
+    sessionStart: [
+      { command: TEAMAI_PULL_COMMAND, timeout: 30 },
+      { command: getDashboardReportCommand(tool), timeout: 10 },
+    ],
+    stop: [
+      { command: TEAMAI_UPDATE_COMMAND, timeout: 90 },
+      { command: getDashboardReportCommand(tool), timeout: 10 },
+    ],
+    postToolUse: [
+      { command: getTrackCommand(tool), timeout: 10, matcher: 'Skill' },
+      { command: getDashboardReportCommand(tool), timeout: 10 },
+    ],
+    userPromptSubmit: [
+      { command: getTrackSlashCommand(tool), timeout: 10 },
+      { command: getDashboardReportCommand(tool), timeout: 10 },
+    ],
+  };
+}
 
 // ─── Tool format detection ──────────────────────────────────
 
@@ -180,10 +197,25 @@ function detectFormat(tool: string): ToolFormat {
   return CURSOR_TOOLS.has(tool) ? 'cursor' : 'claude';
 }
 
+function extractTeamaiSubcommand(command: string): string | null {
+  const match = command.match(/teamai\s+([\w-]+)/);
+  return match ? match[1] : null;
+}
+
+function isTeamaiHookCommand(command: string): boolean {
+  return /"teamai\s/.test(command);
+}
+
 // ─── Claude Code hooks injection ────────────────────────────
 
 /** Known teamai command substrings used to identify teamai-managed hooks. */
-const TEAMAI_COMMAND_MARKERS = ['teamai pull', 'teamai update', 'teamai track', 'teamai dashboard'];
+const TEAMAI_COMMAND_MARKERS = [
+  'teamai pull',
+  'teamai update',
+  'teamai track',
+  'teamai track-slash',
+  'teamai dashboard-report',
+];
 
 /**
  * Remove all teamai-managed hooks (identified by command content).
@@ -306,7 +338,7 @@ async function removeClaudeHooks(settingsPath: string): Promise<void> {
 
 // ─── Cursor hooks injection ─────────────────────────────────
 
-async function injectCursorHooks(hooksPath: string): Promise<void> {
+async function injectCursorHooks(hooksPath: string, tool: string): Promise<void> {
   const expanded = expandHome(hooksPath);
   await ensureDir(path.dirname(expanded));
   const hooksJson: CursorHooksJson = (await readJson<CursorHooksJson>(expanded)) ?? {
@@ -321,33 +353,31 @@ async function injectCursorHooks(hooksPath: string): Promise<void> {
     hooksJson.hooks = {};
   }
 
+  const desiredHooks = buildCursorHooks(tool);
   let changed = false;
 
-  // Helper: ensure a Cursor hook exists for a given event type
-  const ensureCursorHook = (
-    eventType: string,
-    expected: CursorHookEntry,
-    matchBy: (h: CursorHookEntry) => boolean,
-  ): void => {
-    if (!hooksJson.hooks[eventType]) {
-      hooksJson.hooks[eventType] = [];
+  for (const [event, newEntries] of Object.entries(desiredHooks)) {
+    if (!hooksJson.hooks[event]) {
+      hooksJson.hooks[event] = [];
     }
-    const idx = hooksJson.hooks[eventType].findIndex(matchBy);
-    if (idx < 0) {
-      hooksJson.hooks[eventType].push(expected);
-      changed = true;
-    } else {
-      const cur = hooksJson.hooks[eventType][idx];
-      if (cur.command !== expected.command || cur.matcher !== expected.matcher) {
-        hooksJson.hooks[eventType][idx] = expected;
+
+    for (const newEntry of newEntries) {
+      const newSubcmd = extractTeamaiSubcommand(newEntry.command);
+      const existingIdx = hooksJson.hooks[event].findIndex(
+        (h) => extractTeamaiSubcommand(h.command) === newSubcmd,
+      );
+      if (existingIdx >= 0) {
+        const cur = hooksJson.hooks[event][existingIdx];
+        if (JSON.stringify(cur) !== JSON.stringify(newEntry)) {
+          hooksJson.hooks[event][existingIdx] = newEntry;
+          changed = true;
+        }
+      } else {
+        hooksJson.hooks[event].push(newEntry);
         changed = true;
       }
     }
-  };
-
-  ensureCursorHook('sessionStart', CURSOR_SESSION_START_HOOK, (h) => h.command.includes('teamai pull'));
-  ensureCursorHook('stop', CURSOR_STOP_HOOK, (h) => h.command.includes('teamai update'));
-  ensureCursorHook('postToolUse', CURSOR_POST_TOOL_USE_HOOK, (h) => h.command.includes('teamai track'));
+  }
 
   if (changed) {
     await writeJson(expanded, hooksJson);
@@ -364,9 +394,7 @@ async function removeCursorHooks(hooksPath: string): Promise<void> {
 
   let changed = false;
   for (const [event, entries] of Object.entries(hooksJson.hooks)) {
-    const filtered = entries.filter(
-      (h) => !h.command.includes('teamai pull') && !h.command.includes('teamai update') && !h.command.includes('teamai track')
-    );
+    const filtered = entries.filter((h) => !isTeamaiHookCommand(h.command));
     if (filtered.length !== entries.length) {
       hooksJson.hooks[event] = filtered;
       changed = true;
@@ -388,7 +416,7 @@ export async function injectHooks(settingsPath: string, tool?: string): Promise<
   const toolName = tool ?? 'claude';
   const format = detectFormat(toolName);
   if (format === 'cursor') {
-    await injectCursorHooks(settingsPath);
+    await injectCursorHooks(settingsPath, toolName);
   } else {
     await injectClaudeHooks(settingsPath, toolName);
   }
