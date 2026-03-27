@@ -2,6 +2,17 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+### [0.6.1](https://git.woa.com/teamai/teamai-cli/compare/v0.6.0...v0.6.1) (2026-03-27)
+
+
+### Bug Fixes
+
+* **contribute-check**: per-session state files to prevent multi-window overwrite ([!77](https://git.woa.com/teamai/teamai-cli/-/merge_requests/77))
+  - `contribute-state.json` 单文件被多窗口互相覆盖，toolCount 反复归零
+  - 改为 `~/.teamai/sessions/{sessionId}.json`，每个 session 独立文件，零竞争
+  - 写入时自动清理超过 24h 的旧 session 文件
+  - `CONTRIBUTE_BASE_THRESHOLD` 从 100 降到 50，匹配实际 session 工具调用分布
+
 ## [0.6.0](https://git.woa.com/teamai/teamai-cli/compare/v0.5.2...v0.6.0) (2026-03-27)
 
 ### 🚀 Session 经验自动分享
