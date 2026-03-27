@@ -231,10 +231,10 @@ export async function contributeCheck(toolArg?: string): Promise<void> {
   const toolCount = updatedState.toolCount;
   const uniqueTools = new Set(sessionEvents.filter((e) => e.toolName).map((e) => e.toolName)).size;
   const hint = [
-    `[teamai] This session has been productive (${toolCount} tool calls, ${uniqueTools} different tools).`,
-    `Consider running /contribute to summarize and share your learnings with the team.`,
-    `The summary will be saved to the team repo as a knowledge document.`,
-  ].join(' ');
+    `[teamai] 本次 session 内容丰富（${toolCount} 次工具调用，${uniqueTools} 种不同工具）。`,
+    `建议运行 /contribute 总结本次 session 的经验并分享给团队。`,
+    `总结文档将保存到团队仓库的 ai-docs/ 目录。`,
+  ].join('');
 
   // STDOUT goes to Claude Code as hook output → AI context
   process.stdout.write(hint);
