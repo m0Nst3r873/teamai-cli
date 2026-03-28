@@ -153,6 +153,32 @@ envCmd
     await envRemove(key, globalOpts);
   });
 
+// ─── Hooks commands ─────────────────────────────────────
+
+const hooksCmd = program
+  .command('hooks')
+  .description('Manage teamai hooks in AI tool settings');
+
+hooksCmd
+  .command('inject')
+  .description('Inject teamai hooks into all AI tool settings')
+  .option('--silent', 'Silent mode (suppress success message)')
+  .action(async (cmdOpts) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    if (cmdOpts.silent) setSilent(true);
+    const { hooksInject } = await import('./hooks-cmd.js');
+    await hooksInject({ ...globalOpts, ...cmdOpts });
+  });
+
+hooksCmd
+  .command('remove')
+  .description('Remove teamai hooks from all AI tool settings')
+  .action(async () => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { hooksRemove } = await import('./hooks-cmd.js');
+    await hooksRemove(globalOpts);
+  });
+
 // ─── Usage tracking commands ────────────────────────────
 
 program

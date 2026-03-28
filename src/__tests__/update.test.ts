@@ -20,11 +20,6 @@ vi.mock('../config.js', () => ({
   loadState: vi.fn(),
   saveState: vi.fn(),
   loadLocalConfig: vi.fn(),
-  loadTeamConfig: vi.fn(),
-}));
-
-vi.mock('../hooks.js', () => ({
-  injectHooksToAllTools: vi.fn(),
 }));
 
 vi.mock('../utils/logger.js', () => ({
@@ -62,8 +57,7 @@ vi.mock('node:readline', () => ({
 
 import { execSync } from 'node:child_process';
 import fse from 'fs-extra';
-import { loadState, saveState, loadLocalConfig, loadTeamConfig } from '../config.js';
-import { injectHooksToAllTools } from '../hooks.js';
+import { loadState, saveState, loadLocalConfig } from '../config.js';
 import { log } from '../utils/logger.js';
 
 import {
@@ -83,8 +77,6 @@ const mockedExecSync = execSync as Mock;
 const mockedLoadState = loadState as Mock;
 const mockedSaveState = saveState as Mock;
 const mockedLoadLocalConfig = loadLocalConfig as Mock;
-const mockedLoadTeamConfig = loadTeamConfig as Mock;
-const mockedInjectHooksToAllTools = injectHooksToAllTools as Mock;
 const mockedFse = fse as unknown as {
   pathExists: Mock;
   readFile: Mock;
@@ -123,13 +115,6 @@ beforeEach(() => {
     username: 'testuser',
     updatePolicy: 'auto',
   });
-  mockedLoadTeamConfig.mockResolvedValue({
-    toolPaths: {
-      claude: { settings: '.claude/settings.json', skills: '.claude/skills' },
-      'claude-internal': { settings: '.claude-internal/settings.json', skills: '.claude-internal/skills' },
-    },
-  });
-  mockedInjectHooksToAllTools.mockResolvedValue(undefined);
   mockedFse.pathExists.mockResolvedValue(false);
   mockedFse.readFile.mockResolvedValue('');
   mockedFse.writeFile.mockResolvedValue(undefined);
@@ -284,11 +269,12 @@ describe('doUpdate', () => {
   it('should execute npm install when policy is auto and update available', async () => {
     mockedExecSync
       .mockReturnValueOnce('99.0.0\n') // npm view
-      .mockReturnValueOnce('');          // npm install
+      .mockReturnValueOnce('')          // npm install
+      .mockReturnValueOnce('');         // teamai hooks inject --silent
 
     await doUpdate();
 
-    expect(mockedExecSync).toHaveBeenCalledTimes(2);
+    expect(mockedExecSync).toHaveBeenCalledTimes(3);
     expect(mockedExecSync).toHaveBeenCalledWith(
       expect.stringContaining('npm install -g'),
       expect.any(Object),
@@ -335,11 +321,12 @@ describe('doUpdate', () => {
     });
     mockedExecSync
       .mockReturnValueOnce('99.0.0\n')
+      .mockReturnValueOnce('')
       .mockReturnValueOnce('');
 
     await doUpdate();
 
-    expect(mockedExecSync).toHaveBeenCalledTimes(2);
+    expect(mockedExecSync).toHaveBeenCalledTimes(3);
     expect(mockedLog.success).toHaveBeenCalled();
 
     Object.defineProperty(process.stdin, 'isTTY', { value: origIsTTY, configurable: true });
@@ -369,6 +356,7 @@ describe('doUpdate', () => {
     mockedFse.pathExists.mockResolvedValue(false);
     mockedExecSync
       .mockReturnValueOnce('99.0.0\n')
+      .mockReturnValueOnce('')
       .mockReturnValueOnce('');
 
     await doUpdate();
@@ -497,11 +485,12 @@ describe('update', () => {
   it('should run full update flow without --check', async () => {
     mockedExecSync
       .mockReturnValueOnce('99.0.0\n')
+      .mockReturnValueOnce('')
       .mockReturnValueOnce('');
 
     await update({});
 
-    expect(mockedExecSync).toHaveBeenCalledTimes(2);
+    expect(mockedExecSync).toHaveBeenCalledTimes(3);
     expect(mockedLog.success).toHaveBeenCalled();
   });
 });
@@ -509,55 +498,43 @@ describe('update', () => {
 // ─── Hook refresh after update tests ────────────────────
 
 describe('hook refresh after update', () => {
-  it('should refresh hooks after successful update', async () => {
+  it('should spawn "teamai hooks inject --silent" after successful update', async () => {
     mockedExecSync
       .mockReturnValueOnce('99.0.0\n') // npm view
-      .mockReturnValueOnce('');          // npm install
+      .mockReturnValueOnce('')          // npm install
+      .mockReturnValueOnce('');         // teamai hooks inject --silent
 
     await doUpdate();
 
     expect(mockedLog.success).toHaveBeenCalledWith(
       expect.stringContaining('Updated teamai to v99.0.0'),
     );
-    expect(mockedLoadTeamConfig).toHaveBeenCalledWith('/tmp/repo');
-    expect(mockedInjectHooksToAllTools).toHaveBeenCalledWith(
-      expect.objectContaining({
-        claude: expect.any(Object),
-        'claude-internal': expect.any(Object),
-      }),
+    expect(mockedExecSync).toHaveBeenCalledTimes(3);
+    expect(mockedExecSync).toHaveBeenCalledWith(
+      'teamai hooks inject --silent',
+      expect.objectContaining({ timeout: 15_000, stdio: 'pipe' }),
+    );
+    expect(mockedLog.success).toHaveBeenCalledWith(
+      expect.stringContaining('Refreshed hooks'),
     );
   });
 
-  it('should silently skip hook refresh when not initialized', async () => {
-    mockedLoadLocalConfig
-      .mockResolvedValueOnce({
-        repo: { localPath: '/tmp/repo', remote: 'https://...' },
-        username: 'testuser',
-        updatePolicy: 'auto',
-      })
-      .mockResolvedValueOnce(null); // second call (after install) returns null
-
+  it('should silently skip hook refresh when spawn fails', async () => {
     mockedExecSync
-      .mockReturnValueOnce('99.0.0\n')
-      .mockReturnValueOnce('');
+      .mockReturnValueOnce('99.0.0\n') // npm view
+      .mockReturnValueOnce('')          // npm install
+      .mockImplementationOnce(() => {   // teamai hooks inject fails
+        throw new Error('command not found');
+      });
 
     await doUpdate();
 
-    expect(mockedLog.success).toHaveBeenCalled();
-    expect(mockedInjectHooksToAllTools).not.toHaveBeenCalled();
-  });
-
-  it('should silently skip hook refresh when teamConfig is missing', async () => {
-    mockedLoadTeamConfig.mockResolvedValue(null);
-
-    mockedExecSync
-      .mockReturnValueOnce('99.0.0\n')
-      .mockReturnValueOnce('');
-
-    await doUpdate();
-
-    expect(mockedLog.success).toHaveBeenCalled();
-    expect(mockedInjectHooksToAllTools).not.toHaveBeenCalled();
+    expect(mockedLog.success).toHaveBeenCalledWith(
+      expect.stringContaining('Updated teamai to v99.0.0'),
+    );
+    expect(mockedLog.debug).toHaveBeenCalledWith(
+      expect.stringContaining('Hook refresh after update skipped'),
+    );
   });
 });
 
