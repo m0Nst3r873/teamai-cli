@@ -2,6 +2,58 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.8.0](https://git.woa.com/teamai/teamai-cli/compare/v0.7.1...v0.8.0) (2026-03-28)
+
+### 🧠 Git-Native Memory — 团队知识回忆系统
+
+借鉴 [vectorize-io/hindsight](https://github.com/vectorize-io/hindsight) 的 retain/recall 记忆模型，为 teamai 补全知识飞轮的"读出路径"。之前通过 `/teamai-share-learnings` 贡献的经验文档写了没人看，现在 AI 可以通过 `teamai recall` 自动搜索和引用。
+
+**知识飞轮闭环：** `contribute(写入) → pull(同步+索引) → recall(搜索) → upvote(投票) → 排序优化`
+
+#### 新功能
+
+* **`teamai recall <query>`** — 搜索团队知识库，返回按相关性排名的结果 ([!81](https://git.woa.com/teamai/teamai-cli/-/merge_requests/81))
+* **Pull 自动同步 learnings** — `teamai pull` 现在会同步 `learnings/` 目录到本地，并自动重建搜索索引
+* **Hybrid 中英文搜索** — Intl.Segmenter 拆分英文词 + CJK bigrams 捕捉中文复合词（如"超时""排查"），解决纯 Segmenter 把中文拆成单字的问题
+* **搜索自动投票** — recall 返回结果时自动为文档投票（`votes/<user>.yaml`），好文档随时间自然浮到顶部
+* **Frontmatter 标准化** — SKILL.md 模板要求 AI 生成的文档包含 `title/author/date/tags` YAML frontmatter，提升搜索精准度
+
+#### 搜索评分规则
+
+| 匹配类型 | 分值 | 说明 |
+|----------|------|------|
+| 标题命中 | ×3 | frontmatter title 中的词匹配 |
+| 标签命中 | ×2 | frontmatter tags 中的词匹配 |
+| 正文命中 | ×1 | 文档正文（前 2000 字）中的词匹配 |
+| 投票加分 | +0.5/票 | 每票 +0.5，上限 5 分 |
+
+#### 示例
+
+```bash
+$ teamai recall "fuse 端口"
+--- [teamai:recall:start] --- (1 result)
+
+[1/1] MR 审查发现 FUSE 端口冲突 Bug 及 UpdateInferService 接口测试验证 ★1
+Author: jeffyxu | Date: 2026-03-28 | Score: 18.5
+Tags: troubleshooting, code-review, tdd, hai_flow, fuse, k8s
+File: ~/.teamai/learnings/mr审查发现fuse端口冲突bug及...md
+
+--- [teamai:recall:end] ---
+```
+
+#### 技术细节
+
+| 文件 | 说明 |
+|------|------|
+| `src/utils/search-index.ts` | 搜索引擎核心：hybrid tokenize, buildIndex, loadIndex, search |
+| `src/recall.ts` | recall CLI 命令 + autoUpvote |
+| `src/types.ts` | LearningDoc, SearchIndex, UserVotes 类型 |
+| `src/pull.ts` | learnings 同步 + 索引重建（内联实现，不继承 ResourceHandler） |
+| `src/team-push.ts` | auto-report 扩展：投票数据随 pull 捎带推送 |
+
+**测试：** 29 个新测试，全量 444 通过。
+**设计文档：** `docs/designs/git-native-memory.md`
+
 ## [0.7.1](https://git.woa.com/teamai/teamai-cli/compare/v0.7.0...v0.7.1) (2026-03-28)
 
 ### 改进 contribute 经验分享系统
