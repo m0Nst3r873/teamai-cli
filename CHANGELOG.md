@@ -2,6 +2,24 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.7.1](https://git.woa.com/teamai/teamai-cli/compare/v0.7.0...v0.7.1) (2026-03-28)
+
+### 改进 contribute 经验分享系统
+
+**目录重命名：** `ai-docs/` → `learnings/`，语义更清晰。
+
+**smartScore 评分修复：** 之前的评分逻辑导致提醒从未触发（13 个 session，0 个达标）。
+- 新增 toolCount 梯度维度（30→10, 50→15, 80+→20，max 20 分）
+- Skill/Error 权重从 25 分降至 15 分（大多数有价值 session 不一定用到）
+- 阈值从 60 降至 35
+- 真实数据验证：7 个历史 session 中 6 个可触发（之前 0 个）
+
+**文件名格式：** `data-<slug>-<random>.md` → `<slug>-<date>-<random>.md`，加入日期便于辨识。
+
+**中文文档模板：** SKILL.md 改为中文模板，AI 生成的经验文档默认中文撰写。
+
+**测试：** 新增 2 个测试用例（toolCount gradient + 典型 session 集成），全量 12 个 contribute-check 测试通过。
+
 ## [0.7.0](https://git.woa.com/teamai/teamai-cli/compare/v0.6.2...v0.7.0) (2026-03-28)
 
 ### 🚀 `teamai hooks` 子命令 + update 钩子刷新修复
