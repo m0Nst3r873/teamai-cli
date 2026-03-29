@@ -47,7 +47,7 @@ stages:
         - "if [ -n \"$TEAMAI_TEST_TOKEN\" ] && [ -n \"$TEAMAI_TEST_REPO_URL\" ]; then\n\
           \  echo \"Setting up auth for remote E2E tests...\"\n  echo \"machine git.woa.com\
           \ login oauth2 password $TEAMAI_TEST_TOKEN\" > ~/.netrc\n  chmod 600 ~/.netrc\n\
-          \  node dist/index.js init --repo \"$TEAMAI_TEST_REPO_URL\"\nfi\n"
+          \  echo Y | node dist/index.js init --repo \"$TEAMAI_TEST_REPO_URL\"\nfi\n"
         - npx vitest run --config vitest.e2e.config.ts
 - stage: publish
   tasks:
