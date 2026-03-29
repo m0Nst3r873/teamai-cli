@@ -5,8 +5,8 @@ import os from 'node:os';
 import YAML from 'yaml';
 import { autoUpvote } from '../recall.js';
 import { buildIndex, loadIndex, search } from '../utils/search-index.js';
-import type { SearchResult, SearchIndex } from '../utils/search-index.js';
-import type { UserVotes } from '../types.js';
+import type { SearchResult } from '../utils/search-index.js';
+import type { SearchIndex, UserVotes } from '../types.js';
 
 // ─── Test helpers ──────────────────────────────────────────
 
