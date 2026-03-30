@@ -60,17 +60,23 @@ function deriveSessionId(hookData: Record<string, unknown>): string {
 }
 
 /**
- * Map Claude Code hook event names to dashboard event types.
+ * Map hook event names to dashboard event types.
+ * Supports both Claude Code PascalCase and Cursor camelCase naming.
  */
 function mapEventType(hookEventName: string): DashboardEventType | null {
   switch (hookEventName) {
     case 'SessionStart':
+    case 'sessionStart':
       return 'session_start';
     case 'PostToolUse':
+    case 'postToolUse':
       return 'tool_use';
     case 'UserPromptSubmit':
+    case 'userPromptSubmit':
+    case 'beforeSubmitPrompt':
       return 'prompt_submit';
     case 'Stop':
+    case 'stop':
       return 'stop';
     default:
       return null;
@@ -147,7 +153,12 @@ export async function appendEvent(event: DashboardEvent): Promise<void> {
     await ensureDir(path.dirname(eventsPath));
     const line = JSON.stringify(event) + '\n';
     await fs.promises.appendFile(eventsPath, line, 'utf-8');
-    log.debug(`dashboard: recorded ${event.type} for session ${event.sessionId.slice(0, 16)}`);
+    const detail = event.toolName
+      ? ` [tool=${event.toolName}]`
+      : event.promptSummary
+        ? ` [prompt=${event.promptSummary.slice(0, 60)}]`
+        : '';
+    log.debug(`dashboard: recorded ${event.type} for session ${event.sessionId.slice(0, 16)}${detail}`);
   } catch (e) {
     log.error(`dashboard: failed to write event: ${(e as Error).message}`);
   }

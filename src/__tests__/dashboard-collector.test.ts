@@ -96,6 +96,50 @@ describe('parseHookEvent', () => {
     expect(parseHookEvent('not json', 'claude')).toBeNull();
   });
 
+  it('parses Cursor camelCase sessionStart event', () => {
+    const raw = JSON.stringify({
+      hook_event_name: 'sessionStart',
+      session_id: 'sess-cursor-1',
+      cwd: '/home/jeff/project',
+    });
+    const event = parseHookEvent(raw, 'cursor');
+    expect(event).not.toBeNull();
+    expect(event!.type).toBe('session_start');
+    expect(event!.sessionId).toBe('sess-cursor-1');
+    expect(event!.tool).toBe('cursor');
+  });
+
+  it('parses Cursor camelCase stop event', () => {
+    const raw = JSON.stringify({
+      hook_event_name: 'stop',
+      session_id: 'sess-cursor-2',
+    });
+    const event = parseHookEvent(raw, 'cursor');
+    expect(event!.type).toBe('stop');
+  });
+
+  it('parses Cursor camelCase postToolUse event', () => {
+    const raw = JSON.stringify({
+      hook_event_name: 'postToolUse',
+      session_id: 'sess-cursor-3',
+      tool_name: 'Read',
+    });
+    const event = parseHookEvent(raw, 'cursor');
+    expect(event!.type).toBe('tool_use');
+    expect(event!.toolName).toBe('Read');
+  });
+
+  it('parses Cursor beforeSubmitPrompt event', () => {
+    const raw = JSON.stringify({
+      hook_event_name: 'beforeSubmitPrompt',
+      session_id: 'sess-cursor-4',
+      prompt: 'Fix the bug in auth.ts',
+    });
+    const event = parseHookEvent(raw, 'cursor');
+    expect(event!.type).toBe('prompt_submit');
+    expect(event!.promptSummary).toBe('Fix the bug in auth.ts');
+  });
+
   it('returns null for unknown hook event', () => {
     const raw = JSON.stringify({
       hook_event_name: 'UnknownEvent',
