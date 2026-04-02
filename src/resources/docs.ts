@@ -2,6 +2,7 @@ import path from 'node:path';
 import fse from 'fs-extra';
 import { ResourceHandler } from './base.js';
 import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
+import { resolveBaseDir } from '../types.js';
 import { pathExists, expandHome, listFiles } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 
@@ -42,8 +43,18 @@ export class DocsHandler extends ResourceHandler {
   /**
    * Sync docs from team repo to local docs directory.
    */
-  async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
-    const localDocsDir = expandHome(teamConfig.sharing.docs.localDir);
+  async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<void> {
+    // For project scope, resolve docs dir relative to projectRoot
+    const docsLocalDir = teamConfig.sharing.docs.localDir;
+    let localDocsDir: string;
+    if (localConfig.scope === 'project' && localConfig.projectRoot) {
+      // Replace ~ with projectRoot
+      localDocsDir = docsLocalDir.startsWith('~/')
+        ? path.join(localConfig.projectRoot, docsLocalDir.substring(2))
+        : expandHome(docsLocalDir);
+    } else {
+      localDocsDir = expandHome(docsLocalDir);
+    }
     try {
       const src = expandHome(item.sourcePath);
       await fse.copy(src, localDocsDir, {

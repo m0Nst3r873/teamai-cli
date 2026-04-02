@@ -2,7 +2,8 @@ import path from 'node:path';
 import { ensureDir, writeFile, pathExists } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import { ResourceHandler } from './resources/base.js';
-import type { TeamaiConfig } from './types.js';
+import type { TeamaiConfig, LocalConfig } from './types.js';
+import { resolveBaseDir } from './types.js';
 
 // ─── Built-in rules deployment ──────────────────────────
 //
@@ -73,8 +74,8 @@ teamai recall "SGLang deployment"
  *
  * @returns Number of tool directories that received built-in rules.
  */
-export async function deployBuiltinRules(teamConfig: TeamaiConfig): Promise<number> {
-    const home = process.env.HOME ?? '';
+export async function deployBuiltinRules(teamConfig: TeamaiConfig, localConfig?: LocalConfig): Promise<number> {
+    const baseDir = localConfig ? resolveBaseDir(localConfig) : (process.env.HOME ?? '');
     let deployed = 0;
 
     const builtinRules = [
@@ -85,12 +86,12 @@ export async function deployBuiltinRules(teamConfig: TeamaiConfig): Promise<numb
         if (!toolPath.rules) continue;
 
         // Skip tools that are not installed
-        if (!await ResourceHandler.isToolInstalled(toolPath.rules)) {
+        if (!await ResourceHandler.isToolInstalled(toolPath.rules, baseDir)) {
             log.debug(`Skipping built-in rules for ${tool}: tool not installed`);
             continue;
         }
 
-        const rulesDir = path.join(home, toolPath.rules);
+        const rulesDir = path.join(baseDir, toolPath.rules);
         if (!await pathExists(rulesDir)) continue;
 
         try {

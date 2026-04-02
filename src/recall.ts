@@ -1,16 +1,23 @@
 import path from 'node:path';
 import YAML from 'yaml';
-import { requireInit } from './config.js';
+import { requireInit, detectProjectConfig } from './config.js';
 import { loadIndex, buildIndex, search } from './utils/search-index.js';
 import type { SearchResult } from './utils/search-index.js';
 import { readFileSafe, writeFile, ensureDir, pathExists } from './utils/fs.js';
 import { log } from './utils/logger.js';
-import type { GlobalOptions, UserVotes } from './types.js';
-import { LEARNINGS_LOCAL_DIR } from './types.js';
+import type { GlobalOptions, UserVotes, SearchIndex, LocalConfig } from './types.js';
+import { getTeamaiHome } from './types.js';
 
 /** Resolve votes dir dynamically (respects HOME changes in tests). */
 function getVotesLocalDir(): string {
   return `${process.env.HOME ?? ''}/.teamai/votes`;
+}
+
+/** Search result with scope label for merged output. */
+interface ScopedSearchResult extends SearchResult {
+  scope?: 'user' | 'project';
+  /** Base path for learnings files (so AI can read the correct path). */
+  learningsBase?: string;
 }
 
 // ─── Recall data flow ────────────────────────────────────
@@ -36,21 +43,26 @@ function getVotesLocalDir(): string {
  * Format search results for CLI / AI consumption.
  *
  * Output uses delimiters so AI treats content as reference, not instruction.
+ * Each entry includes a scope label (user/project) when source is known.
  */
-function formatResults(results: SearchResult[]): string {
+function formatResults(results: ScopedSearchResult[]): string {
   const lines: string[] = [];
   lines.push(`--- [teamai:recall:start] --- (${results.length} result${results.length !== 1 ? 's' : ''})`);
   lines.push('');
 
   for (let i = 0; i < results.length; i++) {
-    const { entry, score } = results[i];
+    const { entry, score, scope, learningsBase } = results[i];
     const voteStr = entry.votes > 0 ? ` ★${entry.votes}` : '';
-    lines.push(`[${i + 1}/${results.length}] ${entry.title}${voteStr}`);
+    const scopeStr = scope ? ` [${scope}]` : '';
+    lines.push(`[${i + 1}/${results.length}] ${entry.title}${voteStr}${scopeStr}`);
     lines.push(`Author: ${entry.author || 'unknown'} | Date: ${entry.date || 'unknown'} | Score: ${score.toFixed(1)}`);
     if (entry.tags.length > 0) {
       lines.push(`Tags: ${entry.tags.join(', ')}`);
     }
-    lines.push(`File: ~/.teamai/learnings/${entry.filename}`);
+    const filePath = learningsBase
+      ? `${learningsBase}/${entry.filename}`
+      : `~/.teamai/learnings/${entry.filename}`;
+    lines.push(`File: ${filePath}`);
     lines.push('');
   }
 
@@ -125,10 +137,63 @@ export async function autoUpvote(
 }
 
 /**
+ * Load or build a search index for a given scope config.
+ *
+ * - user scope: learnings 在 pull 时同步到 ~/.teamai/learnings/，索引存 ~/.teamai/search-index.json
+ * - project scope: learnings 只存在于 git repo 中（pull 不同步），索引存 <projectRoot>/.teamai/search-index.json
+ *
+ * 返回索引和 learnings 文件的实际基础路径（供 formatResults 输出正确的 File: 路径）。
+ */
+async function loadOrBuildScopeIndex(
+  localConfig: LocalConfig,
+  scopeLabel: 'user' | 'project',
+): Promise<{ index: SearchIndex; learningsBase: string } | null> {
+  const teamaiHome = localConfig.scope === 'project' && localConfig.projectRoot
+    ? getTeamaiHome('project', localConfig.projectRoot)
+    : getTeamaiHome('user');
+  const indexPath = path.join(teamaiHome, 'search-index.json');
+
+  // user scope: learnings 已被 pull 同步到 ~/.teamai/learnings/
+  // project scope: learnings 只在 repo.localPath/learnings/ 中
+  const localLearningsDir = path.join(teamaiHome, 'learnings');
+  const repoLearningsDir = path.join(localConfig.repo.localPath, 'learnings');
+
+  // 确定实际 learnings 目录：user scope 优先用本地副本，project scope 只用 repo
+  let effectiveLearningsDir: string | null = null;
+  if (scopeLabel === 'user' && await pathExists(localLearningsDir)) {
+    effectiveLearningsDir = localLearningsDir;
+  } else if (await pathExists(repoLearningsDir)) {
+    effectiveLearningsDir = repoLearningsDir;
+  }
+
+  let index = await loadIndex(indexPath);
+  if (!index && effectiveLearningsDir) {
+    const votesDir = path.join(localConfig.repo.localPath, 'votes');
+    const votesExist = await pathExists(votesDir);
+    try {
+      await buildIndex(
+        effectiveLearningsDir,
+        votesExist ? votesDir : undefined,
+        indexPath,
+      );
+      index = await loadIndex(indexPath);
+    } catch (e) {
+      log.debug(`Index build failed for ${scopeLabel}: ${(e as Error).message}`);
+    }
+  }
+
+  if (!index) return null;
+
+  // learningsBase: 实际文件所在路径，用于输出给用户/AI 读取
+  const learningsBase = effectiveLearningsDir ?? localLearningsDir;
+  return { index, learningsBase };
+}
+
+/**
  * Handle `teamai recall <query>`.
  *
- * Searches the local learnings index and displays ranked results.
- * Auto-upvotes returned documents for the knowledge flywheel.
+ * Searches both user and project scope learnings indexes, merges results,
+ * and displays ranked results. Auto-upvotes returned documents.
  */
 export async function recall(
   query: string,
@@ -140,56 +205,83 @@ export async function recall(
     return;
   }
 
-  // Load or build index
-  let index = await loadIndex();
-  if (!index) {
-    log.info('No search index found, building...');
-    try {
-      const { localConfig } = await requireInit();
-      const learningsDir = path.join(localConfig.repo.localPath, 'learnings');
-      if (await pathExists(learningsDir)) {
-        const votesDir = path.join(localConfig.repo.localPath, 'votes');
-        const votesExist = await pathExists(votesDir);
-        await buildIndex(
-          LEARNINGS_LOCAL_DIR,
-          votesExist ? votesDir : undefined,
-        );
-        index = await loadIndex();
-      }
-    } catch (e) {
-      log.error(`Index build failed: ${(e as Error).message}`);
-    }
+  // Collect indexes from both scopes
+  const scopeIndexes: Array<{ index: SearchIndex; scope: 'user' | 'project'; config: LocalConfig; learningsBase: string }> = [];
 
-    if (!index) {
-      log.info('No learnings available. Run `teamai pull` first to sync team knowledge.');
-      return;
+  // Try user scope
+  try {
+    const { localConfig: userConfig } = await requireInit();
+    const result = await loadOrBuildScopeIndex(userConfig, 'user');
+    if (result && result.index.entries.length > 0) {
+      scopeIndexes.push({ index: result.index, scope: 'user', config: userConfig, learningsBase: result.learningsBase });
     }
+  } catch {
+    log.debug('recall: user scope not available');
   }
 
-  if (index.entries.length === 0) {
-    log.info('Knowledge base is empty. Share your experience with `/teamai-share-learnings` first!');
+  // Try project scope (only when cwd has project-scope config)
+  try {
+    const projectConfig = await detectProjectConfig();
+    if (projectConfig) {
+      const result = await loadOrBuildScopeIndex(projectConfig, 'project');
+      if (result && result.index.entries.length > 0) {
+        scopeIndexes.push({ index: result.index, scope: 'project', config: projectConfig, learningsBase: result.learningsBase });
+      }
+    }
+  } catch {
+    log.debug('recall: project scope not available');
+  }
+
+  if (scopeIndexes.length === 0) {
+    log.info('No learnings available. Run `teamai pull` first to sync team knowledge.');
     return;
   }
 
-  // Search
-  const results = search(query, index);
+  // Merge: search each scope index, tag results with scope, then combine & sort
+  const allResults: ScopedSearchResult[] = [];
+  const seenFilenames = new Set<string>();
 
-  if (results.length === 0) {
+  for (const { index, scope, learningsBase } of scopeIndexes) {
+    const results = search(query, index);
+    for (const r of results) {
+      // Deduplicate by filename across scopes
+      if (!seenFilenames.has(r.entry.filename)) {
+        seenFilenames.add(r.entry.filename);
+        allResults.push({ ...r, scope, learningsBase });
+      }
+    }
+  }
+
+  // Re-sort merged results by score descending, then date descending
+  allResults.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return (b.entry.date || '').localeCompare(a.entry.date || '');
+  });
+
+  // Limit to top 5
+  const topResults = allResults.slice(0, 5);
+
+  if (topResults.length === 0) {
     log.info(`No matching learnings found for "${query}".`);
     return;
   }
 
   // Output results (STDOUT — AI reads this)
-  const output = formatResults(results);
+  const output = formatResults(topResults);
   process.stdout.write(output + '\n');
 
   // Auto-upvote (best-effort, non-blocking for dry-run)
+  // 分 scope 写入各自的 repo，确保 vote 归属正确
   if (!options.dryRun) {
-    try {
-      const { localConfig } = await requireInit();
-      await autoUpvote(results, localConfig.username, localConfig.repo.localPath);
-    } catch (e) {
-      log.error(`autoUpvote skipped: ${(e as Error).message}`);
+    for (const scopeInfo of scopeIndexes) {
+      const scopeResults = topResults.filter(r => r.scope === scopeInfo.scope);
+      if (scopeResults.length > 0) {
+        try {
+          await autoUpvote(scopeResults, scopeInfo.config.username, scopeInfo.config.repo.localPath);
+        } catch (e) {
+          log.error(`autoUpvote skipped for ${scopeInfo.scope}: ${(e as Error).message}`);
+        }
+      }
     }
   }
 }

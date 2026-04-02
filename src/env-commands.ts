@@ -1,6 +1,6 @@
 import path from 'node:path';
 import YAML from 'yaml';
-import { requireInit } from './config.js';
+import { requireInit, detectProjectConfig } from './config.js';
 import { pullRepo } from './utils/git.js';
 import { ensureDir, readFileSafe, writeFile, pathExists } from './utils/fs.js';
 import { log, spinner } from './utils/logger.js';
@@ -13,7 +13,8 @@ const envHandler = new EnvHandler();
  * List all team env variables from env.yaml.
  */
 export async function envList(options: GlobalOptions): Promise<void> {
-  const { localConfig } = await requireInit();
+  const projectConfig = await detectProjectConfig();
+  const localConfig = projectConfig ?? (await requireInit()).localConfig;
   const envYamlPath = path.join(localConfig.repo.localPath, 'env', 'env.yaml');
 
   if (!await pathExists(envYamlPath)) {
@@ -48,7 +49,8 @@ export async function envAdd(
   value: string,
   options: GlobalOptions & { description?: string },
 ): Promise<void> {
-  const { localConfig } = await requireInit();
+  const projectConfig = await detectProjectConfig();
+  const localConfig = projectConfig ?? (await requireInit()).localConfig;
   const repoPath = localConfig.repo.localPath;
   const envYamlPath = path.join(repoPath, 'env', 'env.yaml');
 
@@ -100,7 +102,8 @@ export async function envAdd(
  * Changes are deferred — run `teamai push` to sync to team repo.
  */
 export async function envRemove(key: string, options: GlobalOptions): Promise<void> {
-  const { localConfig } = await requireInit();
+  const projectConfig = await detectProjectConfig();
+  const localConfig = projectConfig ?? (await requireInit()).localConfig;
   const repoPath = localConfig.repo.localPath;
   const envYamlPath = path.join(repoPath, 'env', 'env.yaml');
 

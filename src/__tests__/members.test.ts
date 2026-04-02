@@ -7,6 +7,7 @@ import YAML from 'yaml';
 // Mock external dependencies before importing modules
 vi.mock('../config.js', () => ({
   requireInit: vi.fn(),
+  detectProjectConfig: vi.fn().mockResolvedValue(null),
 }));
 
 vi.mock('../utils/git.js', () => ({
@@ -41,6 +42,7 @@ function mockRequireInit(tmpDir: string, username = 'alice') {
       repo: { localPath: tmpDir, remote: 'https://git.woa.com/team/repo.git' },
       username,
       updatePolicy: 'auto',
+      scope: 'user',
     },
     teamConfig: {
       team: 'test',

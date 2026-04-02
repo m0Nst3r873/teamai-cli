@@ -121,6 +121,7 @@ describe('SkillsHandler.pullItem — skip uninstalled tools', () => {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
       updatePolicy: 'auto',
+    scope: 'user',
     };
 
     // Create a skill in the team repo to pull
@@ -220,6 +221,7 @@ describe('RulesHandler.pullItem — skip uninstalled tools', () => {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
       updatePolicy: 'auto',
+    scope: 'user',
     };
 
     // Create a rule in the team repo
@@ -316,6 +318,7 @@ describe('RulesHandler.pullAllRules — skip CLAUDE.md update for uninstalled to
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
       updatePolicy: 'auto',
+    scope: 'user',
     };
 
     await fse.writeFile(path.join(repoPath, 'rules', 'my-rule.md'), '# My Rule');

@@ -23,6 +23,7 @@ program
   .command('init')
   .description('Initialize teamai (configure TGit, clone repo, register member)')
   .option('--repo <repo>', 'Team repo (owner/repo or full URL)')
+  .option('--scope <scope>', 'Scope: user (default) or project')
   .action(async (cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;
     const { init } = await import('./init.js');
@@ -277,6 +278,7 @@ program
   .option('--file <path>', 'Path to the contribution document')
   .option('--title <title>', 'Title for the contribution document')
   .option('--session-id <id>', 'Session ID for dedup tracking')
+  .option('--scope <scope>', 'Target scope: user or project')
   .action(async (cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;
     const { contribute } = await import('./contribute.js');

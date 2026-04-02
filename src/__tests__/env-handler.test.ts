@@ -57,6 +57,7 @@ describe('EnvHandler', () => {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
       updatePolicy: 'auto',
+    scope: 'user',
     };
   });
 
@@ -185,7 +186,7 @@ describe('EnvHandler', () => {
 
   describe('generateShellBlock', () => {
     it('should generate source line block with markers', () => {
-      const block = handler.generateShellBlock();
+      const block = handler.generateShellBlock('~/.teamai');
 
       expect(block).toContain(TEAMAI_ENV_START);
       expect(block).toContain(TEAMAI_ENV_END);
@@ -269,7 +270,7 @@ describe('EnvHandler', () => {
       const content = await fse.readFile(bashrcPath, 'utf-8');
       expect(content).toContain('# existing config');
       expect(content).toContain(TEAMAI_ENV_START);
-      expect(content).toContain('[ -f ~/.teamai/env.sh ] && source ~/.teamai/env.sh');
+      expect(content).toContain(`[ -f ${homeDir}/.teamai/env.sh ] && source ${homeDir}/.teamai/env.sh`);
       expect(content).toContain(TEAMAI_ENV_END);
       // Should NOT have inline export lines in the profile
       expect(content).not.toContain('export TGIT_API_BASE');
@@ -284,7 +285,7 @@ describe('EnvHandler', () => {
 
       const content = await fse.readFile(zshrcPath, 'utf-8');
       expect(content).toContain(TEAMAI_ENV_START);
-      expect(content).toContain('[ -f ~/.teamai/env.sh ] && source ~/.teamai/env.sh');
+      expect(content).toContain(`[ -f ${homeDir}/.teamai/env.sh ] && source ${homeDir}/.teamai/env.sh`);
     });
 
     it('should idempotently replace existing block (including old-style with exports)', async () => {
@@ -308,8 +309,7 @@ describe('EnvHandler', () => {
       // Old inline export should be gone
       expect(content).not.toContain('OLD_VAR');
       // Source line should be present instead
-      expect(content).toContain('[ -f ~/.teamai/env.sh ] && source ~/.teamai/env.sh');
-      // Surrounding content preserved
+      expect(content).toContain(`[ -f ${homeDir}/.teamai/env.sh ] && source ${homeDir}/.teamai/env.sh`);
       expect(content).toContain('# my config');
       expect(content).toContain('# other config');
       // Only one start/end pair
@@ -372,7 +372,7 @@ describe('EnvHandler', () => {
 
       const content = await fse.readFile(customPath, 'utf-8');
       expect(content).toContain(TEAMAI_ENV_START);
-      expect(content).toContain('[ -f ~/.teamai/env.sh ] && source ~/.teamai/env.sh');
+      expect(content).toContain(`[ -f ${homeDir}/.teamai/env.sh ] && source ${homeDir}/.teamai/env.sh`);
     });
 
     it('should skip when env.yaml has no variables', async () => {

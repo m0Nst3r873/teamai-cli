@@ -35,6 +35,7 @@ describe('contribute', () => {
         },
         teamConfig: {},
       }),
+      detectProjectConfig: vi.fn().mockResolvedValue(null),
     }));
 
     const { contribute } = await import('../contribute.js');
@@ -97,6 +98,7 @@ describe('contribute', () => {
         },
         teamConfig: {},
       }),
+      detectProjectConfig: vi.fn().mockResolvedValue(null),
     }));
 
     const { contribute } = await import('../contribute.js');

@@ -477,10 +477,11 @@ export async function removeHooks(settingsPath: string, tool?: string): Promise<
 /**
  * Inject teamai hooks into all AI tool settings
  */
-export async function injectHooksToAllTools(toolPaths: Record<string, { settings?: string }>): Promise<void> {
+export async function injectHooksToAllTools(toolPaths: Record<string, { settings?: string }>, baseDir?: string): Promise<void> {
+  const resolvedBaseDir = baseDir ?? (process.env.HOME ?? '');
   for (const [tool, paths] of Object.entries(toolPaths)) {
     if (paths.settings) {
-      const settingsPath = path.join(process.env.HOME ?? '', paths.settings);
+      const settingsPath = path.join(resolvedBaseDir, paths.settings);
       try {
         await injectHooks(settingsPath, tool);
       } catch (e) {

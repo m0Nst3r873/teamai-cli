@@ -3,7 +3,7 @@ import { z } from 'zod';
 import YAML from 'yaml';
 import { ResourceHandler } from './base.js';
 import type { ResourceItem, TeamaiConfig, LocalConfig } from '../types.js';
-import { TEAMAI_ENV_START, TEAMAI_ENV_END } from '../types.js';
+import { TEAMAI_ENV_START, TEAMAI_ENV_END, getTeamaiHome } from '../types.js';
 import { pathExists, readFileSafe, writeFile, ensureDir } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 
@@ -81,7 +81,7 @@ export class EnvHandler extends ResourceHandler {
   /**
    * Pull env variables: parse env.yaml, write env.sh, inject source line into shell profile.
    */
-  async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
+  async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<void> {
     const content = await readFileSafe(item.sourcePath);
     if (!content) return;
 
@@ -96,14 +96,13 @@ export class EnvHandler extends ResourceHandler {
 
     if (envConfig.variables.length === 0) return;
 
-    // Write ~/.teamai/env (KEY=VALUE backup for loadEnvFile compatibility)
-    const home = process.env.HOME ?? '';
-    const teamaiHome = path.join(home, '.teamai');
+    // Write <teamaiHome>/env (KEY=VALUE backup for loadEnvFile compatibility)
+    const teamaiHome = getTeamaiHome(localConfig.scope, localConfig.projectRoot);
     const backupLines = envConfig.variables.map(v => `${v.key}=${v.value}`);
     await ensureDir(teamaiHome);
     await writeFile(path.join(teamaiHome, 'env'), backupLines.join('\n') + '\n');
 
-    // Write ~/.teamai/env.sh (sourceable export file)
+    // Write <teamaiHome>/env.sh (sourceable export file)
     const envShContent = this.generateEnvFile(envConfig.variables);
     await writeFile(path.join(teamaiHome, 'env.sh'), envShContent);
 
@@ -115,7 +114,7 @@ export class EnvHandler extends ResourceHandler {
         ? teamConfig.sharing.env.shellProfilePath
         : this.detectShellProfile();
 
-      const shellBlock = this.generateShellBlock();
+      const shellBlock = this.generateShellBlock(teamaiHome);
       await this.injectShellProfile(profilePath, shellBlock);
     }
   }
@@ -162,11 +161,11 @@ export class EnvHandler extends ResourceHandler {
   /**
    * Generate the shell block with a source line (instead of inline exports).
    */
-  generateShellBlock(): string {
+  generateShellBlock(teamaiHome: string): string {
     const lines = [
       TEAMAI_ENV_START,
       '# DO NOT EDIT: This section is auto-managed by teamai',
-      '[ -f ~/.teamai/env.sh ] && source ~/.teamai/env.sh',
+      `[ -f ${teamaiHome}/env.sh ] && source ${teamaiHome}/env.sh`,
       TEAMAI_ENV_END,
     ];
     return lines.join('\n');

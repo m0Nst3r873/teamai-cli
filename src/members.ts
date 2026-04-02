@@ -1,6 +1,6 @@
 import YAML from 'yaml';
 import path from 'node:path';
-import { requireInit } from './config.js';
+import { requireInit, detectProjectConfig } from './config.js';
 import { readFileSafe, listFiles } from './utils/fs.js';
 import { pullRepo } from './utils/git.js';
 import { log } from './utils/logger.js';
@@ -23,7 +23,8 @@ export async function getMemberConfig(repoPath: string, username: string): Promi
 }
 
 export async function listMembers(options: GlobalOptions): Promise<void> {
-  const { localConfig } = await requireInit();
+  const projectConfig = await detectProjectConfig();
+  const localConfig = projectConfig ?? (await requireInit()).localConfig;
   const repoPath = localConfig.repo.localPath;
 
   await pullRepo(repoPath);

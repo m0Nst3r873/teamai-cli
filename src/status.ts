@@ -1,6 +1,6 @@
 import path from 'node:path';
 import YAML from 'yaml';
-import { requireInit, loadState } from './config.js';
+import { autoDetectInit, loadStateForScope } from './config.js';
 import { getRepoStatus } from './utils/git.js';
 import { log } from './utils/logger.js';
 import { getAllHandlers } from './resources/index.js';
@@ -9,7 +9,13 @@ import { SkillsHandler } from './resources/skills.js';
 import type { GlobalOptions, ResourceType } from './types.js';
 
 export async function status(options: GlobalOptions): Promise<void> {
-  const { localConfig, teamConfig } = await requireInit();
+  // Auto-detect scope
+  const { localConfig, teamConfig } = await autoDetectInit();
+  const scopeLabel = localConfig.scope;
+
+  // Scope info
+  console.log('');
+  log.info(`Scope: ${scopeLabel}${scopeLabel === 'project' && localConfig.projectRoot ? ` (${localConfig.projectRoot})` : ''}`);
 
   // Git status
   console.log('');
@@ -31,7 +37,7 @@ export async function status(options: GlobalOptions): Promise<void> {
   }
 
   // State
-  const state = await loadState();
+  const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
   console.log('');
   log.info('Sync state:');
   console.log(`  last push: ${state.lastPush ?? 'never'}`);
@@ -101,7 +107,8 @@ export async function status(options: GlobalOptions): Promise<void> {
 }
 
 export async function list(type: string | undefined, options: GlobalOptions): Promise<void> {
-  const { localConfig, teamConfig } = await requireInit();
+  // Auto-detect scope
+  const { localConfig, teamConfig } = await autoDetectInit();
   const repoPath = localConfig.repo.localPath;
 
   const types: ResourceType[] = type

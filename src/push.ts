@@ -1,5 +1,5 @@
 import readline from 'node:readline';
-import { requireInit, loadState, saveState } from './config.js';
+import { autoDetectInit, loadStateForScope, saveStateForScope } from './config.js';
 import { pullRepo, pushRepoBranch, checkoutMaster, generateBranchName } from './utils/git.js';
 import { getProvider } from './providers/index.js';
 import { log, spinner } from './utils/logger.js';
@@ -58,7 +58,9 @@ async function createPrWithFallback(
 export { createPrWithFallback };
 
 export async function push(options: GlobalOptions & { all?: boolean }): Promise<void> {
-  const { localConfig, teamConfig } = await requireInit();
+  // Auto-detect scope: project scope if cwd has project config, else user scope
+  const { localConfig, teamConfig } = await autoDetectInit();
+  const scopeLabel = localConfig.scope;
 
   // Pull latest master BEFORE scanning so detection runs against up-to-date repo
   const pullSpin = spinner('Pulling latest master...').start();
@@ -160,7 +162,7 @@ export async function push(options: GlobalOptions & { all?: boolean }): Promise<
   }
 
   // Update state
-  const state = await loadState();
+  const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
   state.lastPush = new Date().toISOString();
   for (const item of allItems) {
     if (item.type === 'skills' && !state.pushedSkills.includes(item.name)) {
@@ -173,5 +175,5 @@ export async function push(options: GlobalOptions & { all?: boolean }): Promise<
       state.pushedEnvVars.push(item.name);
     }
   }
-  await saveState(state);
+  await saveStateForScope(state, localConfig.scope, localConfig.projectRoot);
 }

@@ -1,14 +1,14 @@
 import YAML from 'yaml';
 import path from 'node:path';
 import readline from 'node:readline';
-import { saveLocalConfig, loadTeamConfig } from './config.js';
+import { saveLocalConfig, loadTeamConfig, saveLocalConfigForScope } from './config.js';
 import { injectHooksToAllTools } from './hooks.js';
 import { configureGitUser, initRepo } from './utils/git.js';
 import { pushRepoDirectly } from './utils/git.js';
 import { getProvider, detectProvider, RepoNotFoundError } from './providers/index.js';
 import { ensureDir, writeFile, pathExists, expandHome, readFileSafe } from './utils/fs.js';
 import { log, spinner } from './utils/logger.js';
-import { TEAMAI_HOME, type GlobalOptions, type LocalConfig } from './types.js';
+import { TEAMAI_HOME, type GlobalOptions, type LocalConfig, type Scope, getTeamaiHome, getConfigPath, resolveBaseDir } from './types.js';
 
 function askQuestion(prompt: string): Promise<string> {
   const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
@@ -20,8 +20,55 @@ function askQuestion(prompt: string): Promise<string> {
   });
 }
 
-export async function init(options: GlobalOptions & { repo?: string }): Promise<void> {
+/**
+ * Validate that the local --scope matches the remote repo's declared scope.
+ * Legacy repos (scope undefined) allow any local scope.
+ */
+export function validateScopeMatch(remoteScope: Scope | undefined, localScope: Scope): void {
+  if (remoteScope === undefined) return; // legacy repo — no restriction
+  if (remoteScope !== localScope) {
+    throw new Error(
+      `Scope mismatch: this repo is configured as "${remoteScope}" scope, ` +
+      `but you are trying to init with --scope ${localScope}. ` +
+      `Please use --scope ${remoteScope}.`,
+    );
+  }
+}
+
+export async function init(options: GlobalOptions & { repo?: string; scope?: string }): Promise<void> {
   log.info('Initializing teamai...');
+
+  // Step 0: Determine scope (user or project)
+  let scope: Scope = 'user';
+  if (options.scope === 'project' || options.scope === 'user') {
+    scope = options.scope as Scope;
+  } else if (process.stdin.isTTY) {
+    const scopeAnswer = await askQuestion('Scope [user/project] (default: user): ');
+    if (scopeAnswer.toLowerCase() === 'project') {
+      scope = 'project';
+    }
+  }
+
+  const projectRoot = scope === 'project' ? process.cwd() : undefined;
+  const teamaiHome = getTeamaiHome(scope, projectRoot);
+
+  log.info(`Scope: ${scope}${scope === 'project' ? ` (${projectRoot})` : ''}`);
+
+  // Step 0.5: Re-init guard — warn if config already exists
+  const existingConfigPath = getConfigPath(scope, projectRoot);
+  if (await pathExists(existingConfigPath)) {
+    log.warn(`teamai is already initialized for ${scope} scope at ${existingConfigPath}`);
+    if (process.stdin.isTTY) {
+      const overwrite = await askQuestion('Overwrite existing config? [y/N] ');
+      if (overwrite.toLowerCase() !== 'y') {
+        log.info('Aborted. Existing config is unchanged.');
+        return;
+      }
+    } else {
+      log.error('Cannot confirm overwrite in non-interactive mode. Aborting.');
+      process.exit(1);
+    }
+  }
 
   // Step 1: Get repo input first (needed to detect provider)
   let repoInput = options.repo ?? '';
@@ -66,7 +113,7 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
   }
 
   // Step 3: Clone or link repo
-  const defaultLocalPath = path.join(process.env.HOME ?? '', '.teamai', 'team-repo');
+  const defaultLocalPath = path.join(teamaiHome, 'team-repo');
   let localPath: string;
 
   if (await pathExists(expandHome(defaultLocalPath))) {
@@ -137,12 +184,13 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
     log.warn('teamai.yaml not found in repo. Creating default config...');
     const defaultConfig = YAML.stringify({
       team: 'my-team',
+      scope,
       description: 'TeamAI shared resources',
       repo: repoInfo.httpsUrl,
       provider: providerName,
       sharing: {
         rules: { enforced: [] },
-        docs: { localDir: '~/.teamai/docs' },
+        docs: { localDir: scope === 'project' ? './.teamai/docs' : '~/.teamai/docs' },
         env: { injectShellProfile: true },
       },
     });
@@ -155,6 +203,14 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
       if (!await pathExists(gitkeep)) {
         await writeFile(gitkeep, '');
       }
+    }
+  } else {
+    // Existing repo — validate that remote scope matches local scope
+    try {
+      validateScopeMatch(teamConfig.scope, scope);
+    } catch (e) {
+      log.error((e as Error).message);
+      process.exit(1);
     }
   }
 
@@ -230,15 +286,48 @@ export async function init(options: GlobalOptions & { repo?: string }): Promise<
     repo: { localPath, remote: repoInfo.httpsUrl },
     username,
     updatePolicy: 'auto',
+    scope,
+    projectRoot,
   };
-  await ensureDir(TEAMAI_HOME);
-  await saveLocalConfig(localConfig);
-  log.success(`Local config saved to ${TEAMAI_HOME}/config.yaml`);
+  await ensureDir(teamaiHome);
+
+  if (scope === 'project') {
+    await saveLocalConfigForScope(localConfig, scope, projectRoot);
+    log.success(`Local config saved to ${teamaiHome}/config.yaml`);
+
+    // Generate .gitignore for project scope to prevent local config from being committed
+    const gitignorePath = path.join(teamaiHome, '.gitignore');
+    if (!await pathExists(gitignorePath)) {
+      const gitignoreContent = [
+        '# teamai local config (do not commit)',
+        'config.yaml',
+        'state.json',
+        'token',
+        '.update-lock',
+        'env',
+        'env.sh',
+        'sessions/',
+        'dashboard/',
+        'usage.jsonl',
+        'known-skills.json',
+        'learnings/',
+        'search-index.json',
+        'votes/',
+        '',
+      ].join('\n');
+      await writeFile(gitignorePath, gitignoreContent);
+      log.debug('Generated .teamai/.gitignore for project scope');
+    }
+  } else {
+    await ensureDir(TEAMAI_HOME);
+    await saveLocalConfig(localConfig);
+    log.success(`Local config saved to ${TEAMAI_HOME}/config.yaml`);
+  }
 
   // Step 7: Inject hooks into AI tools
   const reloadedTeamConfig = await loadTeamConfig(localPath);
   if (reloadedTeamConfig) {
-    await injectHooksToAllTools(reloadedTeamConfig.toolPaths);
+    await injectHooksToAllTools(reloadedTeamConfig.toolPaths, resolveBaseDir(localConfig));
   }
 
   log.success('teamai initialized successfully!');

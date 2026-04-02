@@ -61,10 +61,11 @@ export abstract class ResourceHandler {
    * Check if an AI tool is installed by verifying its root directory exists.
    * e.g. for toolPath ".codebuddy/skills", checks if ~/.codebuddy/ exists.
    * This prevents creating directories for tools the user hasn't installed.
+   * @param baseDir - Override base directory (defaults to HOME). Used for project scope.
    */
-  static async isToolInstalled(toolPath: string): Promise<boolean> {
-    const home = process.env.HOME ?? '';
-    const toolRoot = path.join(home, toolPath.split('/')[0]);
+  static async isToolInstalled(toolPath: string, baseDir?: string): Promise<boolean> {
+    const base = baseDir ?? process.env.HOME ?? '';
+    const toolRoot = path.join(base, toolPath.split('/')[0]);
     return pathExists(toolRoot);
   }
 

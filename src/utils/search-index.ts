@@ -182,6 +182,7 @@ async function aggregateVotes(votesDir: string): Promise<Map<string, number>> {
 export async function buildIndex(
   learningsDir: string,
   votesDir?: string,
+  indexPath?: string,
 ): Promise<number> {
   const start = Date.now();
   const files = await listFiles(learningsDir);
@@ -247,7 +248,7 @@ export async function buildIndex(
     entries,
   };
 
-  await writeJson(getSearchIndexPath(), index);
+  await writeJson(indexPath ?? getSearchIndexPath(), index);
 
   if (elapsed > 2000) {
     log.warn(`Search index build took ${elapsed}ms — consider incremental updates for large knowledge bases`);
@@ -259,8 +260,8 @@ export async function buildIndex(
 /**
  * Load the search index from disk. Returns null if missing or corrupt.
  */
-export async function loadIndex(): Promise<SearchIndex | null> {
-  const raw = await readJson<SearchIndex>(getSearchIndexPath());
+export async function loadIndex(indexPath?: string): Promise<SearchIndex | null> {
+  const raw = await readJson<SearchIndex>(indexPath ?? getSearchIndexPath());
   if (!raw || !Array.isArray(raw.entries)) {
     return null;
   }

@@ -3,8 +3,7 @@ import { describe, it, expect, vi, beforeEach, type Mock } from 'vitest';
 // ── Mocks ────────────────────────────────────────────────
 
 vi.mock('../config.js', () => ({
-    loadLocalConfig: vi.fn(),
-    loadTeamConfig: vi.fn(),
+    autoDetectInit: vi.fn(),
 }));
 
 vi.mock('../hooks.js', () => ({
@@ -24,13 +23,12 @@ vi.mock('../utils/logger.js', () => ({
 
 // ── Imports (after mocks) ────────────────────────────────
 
-import { loadLocalConfig, loadTeamConfig } from '../config.js';
+import { autoDetectInit } from '../config.js';
 import { injectHooksToAllTools, removeHooks } from '../hooks.js';
 import { log } from '../utils/logger.js';
 import { hooksInject, hooksRemove } from '../hooks-cmd.js';
 
-const mockedLoadLocalConfig = loadLocalConfig as Mock;
-const mockedLoadTeamConfig = loadTeamConfig as Mock;
+const mockedAutoDetectInit = autoDetectInit as Mock;
 const mockedInjectHooksToAllTools = injectHooksToAllTools as Mock;
 const mockedRemoveHooks = removeHooks as Mock;
 const mockedLog = log as unknown as {
@@ -45,6 +43,7 @@ const mockLocalConfig = {
     repo: { localPath: '/tmp/repo', remote: 'https://git.woa.com/team/repo.git' },
     username: 'testuser',
     updatePolicy: 'auto',
+    scope: 'user',
 };
 
 const mockTeamConfig = {
@@ -59,8 +58,7 @@ const mockTeamConfig = {
 
 beforeEach(() => {
     vi.clearAllMocks();
-    mockedLoadLocalConfig.mockResolvedValue(mockLocalConfig);
-    mockedLoadTeamConfig.mockResolvedValue(mockTeamConfig);
+    mockedAutoDetectInit.mockResolvedValue({ localConfig: mockLocalConfig, teamConfig: mockTeamConfig });
     mockedInjectHooksToAllTools.mockResolvedValue(undefined);
     mockedRemoveHooks.mockResolvedValue(undefined);
 });
@@ -71,9 +69,11 @@ describe('hooksInject', () => {
     it('should inject hooks into all tools when config exists', async () => {
         await hooksInject({});
 
-        expect(mockedLoadLocalConfig).toHaveBeenCalled();
-        expect(mockedLoadTeamConfig).toHaveBeenCalledWith('/tmp/repo');
-        expect(mockedInjectHooksToAllTools).toHaveBeenCalledWith(mockTeamConfig.toolPaths);
+        expect(mockedAutoDetectInit).toHaveBeenCalled();
+        expect(mockedInjectHooksToAllTools).toHaveBeenCalledWith(
+            mockTeamConfig.toolPaths,
+            expect.any(String),
+        );
         expect(mockedLog.success).toHaveBeenCalledWith(
             expect.stringContaining('Hooks injected'),
         );
@@ -86,34 +86,26 @@ describe('hooksInject', () => {
         expect(mockedLog.success).not.toHaveBeenCalled();
     });
 
-    it('should exit with error when not initialized (no local config)', async () => {
-        mockedLoadLocalConfig.mockResolvedValue(null);
-        const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
-            throw new Error('process.exit');
-        });
+    it('should propagate error when not initialized', async () => {
+        mockedAutoDetectInit.mockRejectedValue(new Error('teamai is not initialized'));
 
-        await expect(hooksInject({})).rejects.toThrow('process.exit');
-
-        expect(mockedLog.error).toHaveBeenCalledWith(
-            expect.stringContaining('not initialized'),
-        );
-        expect(mockExit).toHaveBeenCalledWith(1);
-        mockExit.mockRestore();
+        await expect(hooksInject({})).rejects.toThrow('not initialized');
     });
 
-    it('should exit with error when team config is missing', async () => {
-        mockedLoadTeamConfig.mockResolvedValue(null);
-        const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
-            throw new Error('process.exit');
-        });
+    it('should use project scope baseDir when project config detected', async () => {
+        const projectConfig = {
+            ...mockLocalConfig,
+            scope: 'project',
+            projectRoot: '/path/to/project',
+        };
+        mockedAutoDetectInit.mockResolvedValue({ localConfig: projectConfig, teamConfig: mockTeamConfig });
 
-        await expect(hooksInject({})).rejects.toThrow('process.exit');
+        await hooksInject({});
 
-        expect(mockedLog.error).toHaveBeenCalledWith(
-            expect.stringContaining('teamai.yaml'),
+        expect(mockedInjectHooksToAllTools).toHaveBeenCalledWith(
+            mockTeamConfig.toolPaths,
+            '/path/to/project',
         );
-        expect(mockExit).toHaveBeenCalledWith(1);
-        mockExit.mockRestore();
     });
 });
 
@@ -141,17 +133,9 @@ describe('hooksRemove', () => {
         expect(mockedLog.success).toHaveBeenCalled();
     });
 
-    it('should exit with error when not initialized', async () => {
-        mockedLoadLocalConfig.mockResolvedValue(null);
-        const mockExit = vi.spyOn(process, 'exit').mockImplementation(() => {
-            throw new Error('process.exit');
-        });
+    it('should propagate error when not initialized', async () => {
+        mockedAutoDetectInit.mockRejectedValue(new Error('teamai is not initialized'));
 
-        await expect(hooksRemove({})).rejects.toThrow('process.exit');
-
-        expect(mockedLog.error).toHaveBeenCalledWith(
-            expect.stringContaining('not initialized'),
-        );
-        mockExit.mockRestore();
+        await expect(hooksRemove({})).rejects.toThrow('not initialized');
     });
 });

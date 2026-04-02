@@ -1,11 +1,11 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { requireInit } from './config.js';
+import { requireInit, detectProjectConfig, loadTeamConfig, loadLocalConfigForScope } from './config.js';
 import { pushRepoDirectly, pullRepo } from './utils/git.js';
 import { ensureDir } from './utils/fs.js';
 import { log, spinner } from './utils/logger.js';
 import { markContributed } from './contribute-check.js';
-import type { GlobalOptions } from './types.js';
+import type { GlobalOptions, LocalConfig } from './types.js';
 
 // ─── Contribute data flow ─────────────────────────────────
 //
@@ -51,7 +51,7 @@ function generateFilename(title?: string): string {
  * knowledge items, not code changes.
  */
 export async function contribute(
-  options: GlobalOptions & { file?: string; title?: string; sessionId?: string },
+  options: GlobalOptions & { file?: string; title?: string; sessionId?: string; scope?: string },
 ): Promise<void> {
   // Validate file
   if (!options.file) {
@@ -72,8 +72,20 @@ export async function contribute(
     return;
   }
 
-  // Init check
-  const { localConfig } = await requireInit();
+  // Init check — select scope based on --scope flag or auto-detect
+  let localConfig: LocalConfig;
+  if (options.scope === 'project') {
+    const cfg = await loadLocalConfigForScope('project', process.cwd());
+    if (!cfg) { log.error('当前目录没有项目级 teamai 配置'); return; }
+    localConfig = cfg;
+  } else if (options.scope === 'user') {
+    const { localConfig: userCfg } = await requireInit();
+    localConfig = userCfg;
+  } else {
+    // 自动检测（默认行为不变）
+    const projectConfig = await detectProjectConfig();
+    localConfig = projectConfig ?? (await requireInit()).localConfig;
+  }
   const repoPath = localConfig.repo.localPath;
   const username = localConfig.username;
 

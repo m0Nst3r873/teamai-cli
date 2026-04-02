@@ -1,5 +1,5 @@
 import readline from 'node:readline';
-import { requireInit, loadState, saveState } from './config.js';
+import { autoDetectInit, loadStateForScope, saveStateForScope } from './config.js';
 import { pullRepo, pushRepoBranch, checkoutMaster, generateBranchName } from './utils/git.js';
 import { createPrWithFallback } from './push.js';
 import { log, spinner } from './utils/logger.js';
@@ -28,7 +28,8 @@ export async function remove(
     return;
   }
 
-  const { localConfig, teamConfig } = await requireInit();
+  // Auto-detect scope
+  const { localConfig, teamConfig } = await autoDetectInit();
 
   // Pull latest before making changes
   try {
@@ -113,12 +114,12 @@ export async function remove(
   }
 
   // Clean up state tracking
-  const state = await loadState();
+  const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
   if (type === 'skills') {
     state.pushedSkills = state.pushedSkills.filter((s) => s !== name);
   }
   if (type === 'rules') {
     state.pushedRules = state.pushedRules.filter((r) => r !== name);
   }
-  await saveState(state);
+  await saveStateForScope(state, localConfig.scope, localConfig.projectRoot);
 }

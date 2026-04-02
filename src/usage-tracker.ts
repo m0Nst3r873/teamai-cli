@@ -122,13 +122,22 @@ const SKILL_DIRS = [
  * Check whether a skill actually exists on disk (has a SKILL.md in any tool's skills directory).
  * This prevents tracking phantom skills from typos or path inputs like "/data".
  *
- * Performance: Checks at most 6 directories with a single stat() each — sub-millisecond.
+ * Performance: Checks at most 12 directories (6 user + 6 project) with a single stat() each — sub-millisecond.
  */
 export async function skillExistsOnDisk(skillName: string): Promise<boolean> {
   const home = process.env.HOME ?? '';
+  // Check user-level directories
   for (const dir of SKILL_DIRS) {
     const skillMd = path.join(home, dir, skillName, 'SKILL.md');
     if (await pathExists(skillMd)) return true;
+  }
+  // Check project-level directories (cwd)
+  const cwd = process.cwd();
+  if (path.resolve(cwd) !== path.resolve(home)) {
+    for (const dir of SKILL_DIRS) {
+      const skillMd = path.join(cwd, dir, skillName, 'SKILL.md');
+      if (await pathExists(skillMd)) return true;
+    }
   }
   return false;
 }

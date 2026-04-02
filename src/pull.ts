@@ -1,12 +1,12 @@
 import path from 'node:path';
 import fse from 'fs-extra';
-import { requireInit, loadState, saveState } from './config.js';
+import { requireInit, loadState, saveState, detectProjectConfig, loadLocalConfigForScope, loadTeamConfig, loadStateForScope, saveStateForScope } from './config.js';
 import { pullRepo } from './utils/git.js';
 import { log, spinner } from './utils/logger.js';
 import { pathExists, remove, listFiles } from './utils/fs.js';
 import { getHandler, RulesHandler, DocsHandler, EnvHandler } from './resources/index.js';
-import type { GlobalOptions, ResourceType, ResourceItem, TeamaiConfig } from './types.js';
-import { LEARNINGS_LOCAL_DIR } from './types.js';
+import type { GlobalOptions, ResourceType, ResourceItem, TeamaiConfig, LocalConfig } from './types.js';
+import { LEARNINGS_LOCAL_DIR, resolveBaseDir, getTeamaiHome } from './types.js';
 
 /**
  * Collect names of resources that already exist locally (before pull).
@@ -16,15 +16,16 @@ async function getExistingLocalNames(
   type: ResourceType,
   items: ResourceItem[],
   teamConfig: TeamaiConfig,
+  localConfig: LocalConfig,
 ): Promise<Set<string>> {
   const existing = new Set<string>();
-  const home = process.env.HOME ?? '';
+  const baseDir = resolveBaseDir(localConfig);
 
   if (type === 'skills') {
     // Check the first installed tool's skills directory
     for (const [_tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
       if (!toolPath.skills) continue;
-      const skillsDir = path.join(home, toolPath.skills);
+      const skillsDir = path.join(baseDir, toolPath.skills);
       if (!await pathExists(skillsDir)) continue;
       for (const item of items) {
         const skillDir = path.join(skillsDir, item.name);
@@ -48,18 +49,20 @@ function logSyncDetail(
   items: ResourceItem[],
   existingNames: Set<string>,
   verbose: boolean,
+  scopeLabel?: string,
 ): void {
+  const prefix = scopeLabel ? `[${scopeLabel}] ` : '';
   const added = items.filter(i => !existingNames.has(i.name));
   const updated = items.filter(i => existingNames.has(i.name));
 
   if (added.length === 0 && updated.length > 0) {
-    log.success(`Synced ${items.length} ${type} (all updated)`);
+    log.success(`${prefix}Synced ${items.length} ${type} (all updated)`);
   } else if (added.length > 0) {
-    log.success(`Synced ${items.length} ${type} (${added.length} new, ${updated.length} updated)`);
+    log.success(`${prefix}Synced ${items.length} ${type} (${added.length} new, ${updated.length} updated)`);
     const addedNames = added.map(i => i.name);
     log.dim(`    new: ${addedNames.join(', ')}`);
   } else {
-    log.success(`Synced ${items.length} ${type}`);
+    log.success(`${prefix}Synced ${items.length} ${type}`);
   }
 
   if (verbose && updated.length > 0) {
@@ -68,21 +71,37 @@ function logSyncDetail(
   }
 }
 
-export async function pull(options: GlobalOptions): Promise<void> {
-  const { localConfig, teamConfig } = await requireInit();
+/**
+ * Pull resources for a single scope. This is the core sync logic extracted
+ * from the original pull() function to support both user and project scope.
+ */
+async function pullForScope(
+  localConfig: LocalConfig,
+  options: GlobalOptions,
+): Promise<void> {
+  const scopeLabel = localConfig.scope;
+  const teamConfig = await loadTeamConfig(localConfig.repo.localPath);
+  if (!teamConfig) {
+    log.warn(`[${scopeLabel}] Team config (teamai.yaml) not found. Skipping.`);
+    return;
+  }
 
   // Step 1: git pull
-  const pullSpin = spinner('Pulling team repo...').start();
+  const pullSpin = spinner(`[${scopeLabel}] Pulling team repo...`).start();
   try {
     const result = await pullRepo(localConfig.repo.localPath);
-    pullSpin.succeed(`Team repo: ${result}`);
+    pullSpin.succeed(`[${scopeLabel}] Team repo: ${result}`);
   } catch (e) {
-    pullSpin.fail(`Pull failed: ${(e as Error).message}`);
+    pullSpin.fail(`[${scopeLabel}] Pull failed: ${(e as Error).message}`);
     return;
   }
 
   // Reload team config after pull (might have changed)
-  const { teamConfig: freshConfig } = await requireInit();
+  const freshConfig = await loadTeamConfig(localConfig.repo.localPath);
+  if (!freshConfig) {
+    log.warn(`[${scopeLabel}] Team config disappeared after pull. Skipping.`);
+    return;
+  }
 
   // Step 2: Sync each resource type
   const resourceTypes: ResourceType[] = ['skills', 'rules', 'docs', 'env'];
@@ -92,15 +111,14 @@ export async function pull(options: GlobalOptions): Promise<void> {
     const handler = getHandler(type);
 
     if (type === 'rules') {
-      // Rules use bulk merge into CLAUDE.md
       const rulesHandler = handler as RulesHandler;
       const items = await rulesHandler.scanTeamForPull(freshConfig, localConfig);
       if (items.length > 0) {
         if (options.dryRun) {
-          log.info(`[dry-run] Would sync ${items.length} rule(s)`);
+          log.info(`[${scopeLabel}] [dry-run] Would sync ${items.length} rule(s)`);
         } else {
           await rulesHandler.pullAllRules(freshConfig, localConfig);
-          log.success(`Synced ${items.length} rule(s)`);
+          log.success(`[${scopeLabel}] Synced ${items.length} rule(s)`);
         }
         totalSynced += items.length;
       }
@@ -110,49 +128,48 @@ export async function pull(options: GlobalOptions): Promise<void> {
     const items = await handler.scanTeamForPull(freshConfig, localConfig);
     if (items.length === 0) continue;
 
-    // Env uses special handling
     if (type === 'env') {
       const envHandler = handler as EnvHandler;
       const varCount = await envHandler.countEnvVars(items[0].sourcePath);
       if (varCount === 0) continue;
 
       if (options.dryRun) {
-        log.info(`[dry-run] Would sync ${varCount} env variable(s)`);
+        log.info(`[${scopeLabel}] [dry-run] Would sync ${varCount} env variable(s)`);
       } else {
         await envHandler.pullItem(items[0], freshConfig, localConfig);
-        log.success(`Synced ${varCount} env variable(s) to ~/.teamai/env.sh`);
+        const teamaiHome = getTeamaiHome(localConfig.scope, localConfig.projectRoot);
+        log.success(`[${scopeLabel}] Synced ${varCount} env variable(s) to ${teamaiHome}/env.sh`);
       }
       totalSynced += 1;
       continue;
     }
 
-    // Docs: display actual file count instead of directory count
     if (type === 'docs') {
       const docsHandler = handler as DocsHandler;
       const fileCount = await docsHandler.countDocFiles(items[0].sourcePath);
 
       if (options.dryRun) {
-        log.info(`[dry-run] Would sync ${fileCount} docs`);
+        log.info(`[${scopeLabel}] [dry-run] Would sync ${fileCount} docs`);
       } else {
         await docsHandler.pullItem(items[0], freshConfig, localConfig);
-        log.success(`Synced ${fileCount} docs`);
+        log.success(`[${scopeLabel}] Synced ${fileCount} docs`);
       }
       totalSynced += fileCount;
       continue;
     }
 
     // Collect existing local resource names before pulling
-    const existingNames = await getExistingLocalNames(type, items, freshConfig);
+    const existingNames = await getExistingLocalNames(type, items, freshConfig, localConfig);
 
     if (options.dryRun) {
       const added = items.filter(i => !existingNames.has(i.name));
       const updated = items.filter(i => existingNames.has(i.name));
 
       if (added.length > 0 && type === 'skills') {
-        log.info(`[dry-run] Would pull ${items.length} ${type} (${added.length} new, ${updated.length} updated)`);
+        log.info(`[${scopeLabel}] [dry-run] Would pull ${items.length} ${type} (${added.length} new, ${updated.length} updated)`);
         log.dim(`    new: ${added.map(i => i.name).join(', ')}`);
       } else {
-        log.info(`[dry-run] Would pull ${items.length} ${type}`);
+        log.info(`[${scopeLabel}] [dry-run] Would pull ${items.length} ${type}`);
       }
       if (options.verbose) {
         for (const item of items) {
@@ -165,37 +182,37 @@ export async function pull(options: GlobalOptions): Promise<void> {
       }
 
       if (type === 'skills') {
-        logSyncDetail(type, items, existingNames, !!options.verbose);
+        logSyncDetail(type, items, existingNames, !!options.verbose, scopeLabel);
       } else {
-        log.success(`Synced ${items.length} ${type}`);
+        log.success(`[${scopeLabel}] Synced ${items.length} ${type}`);
       }
     }
 
     totalSynced += items.length;
   }
 
-  // Step 3: Clean up local files that have been tombstoned (removed from team repo)
+  // Step 3: Clean up tombstoned resources
   if (!options.dryRun) {
     const tombstoneTypes: { type: ResourceType; ext?: string }[] = [
       { type: 'rules', ext: '.md' },
       { type: 'skills' },
     ];
 
+    const baseDir = resolveBaseDir(localConfig);
     for (const { type, ext } of tombstoneTypes) {
       const handler = getHandler(type);
       const tombstones = await handler.readTombstones(localConfig);
       if (tombstones.size === 0) continue;
 
-      const home = process.env.HOME ?? '';
       for (const [_tool, toolPath] of Object.entries(freshConfig.toolPaths)) {
         const dir = type === 'rules' ? toolPath.rules : toolPath.skills;
         if (!dir) continue;
 
         for (const name of tombstones) {
-          const localPath = path.join(home, dir, ext ? `${name}${ext}` : name);
+          const localPath = path.join(baseDir, dir, ext ? `${name}${ext}` : name);
           if (await pathExists(localPath)) {
             await remove(localPath);
-            log.debug(`Cleaned up tombstoned ${type} ${name} from ${dir}`);
+            log.debug(`[${scopeLabel}] Cleaned up tombstoned ${type} ${name} from ${dir}`);
           }
         }
       }
@@ -203,16 +220,15 @@ export async function pull(options: GlobalOptions): Promise<void> {
   }
 
   if (totalSynced === 0) {
-    log.info('No resources to sync');
+    log.info(`[${scopeLabel}] No resources to sync`);
   } else if (!options.dryRun) {
-    // Update state
-    const state = await loadState();
+    const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
     state.lastPull = new Date().toISOString();
-    await saveState(state);
+    await saveStateForScope(state, localConfig.scope, localConfig.projectRoot);
   }
 
-  // Step 3.5: Sync learnings and rebuild search index
-  if (!options.dryRun) {
+  // Step 3.5: Sync learnings and rebuild search index (user scope only)
+  if (!options.dryRun && localConfig.scope === 'user') {
     try {
       const learningsRepoDir = path.join(localConfig.repo.localPath, 'learnings');
       if (await pathExists(learningsRepoDir)) {
@@ -238,34 +254,34 @@ export async function pull(options: GlobalOptions): Promise<void> {
     }
   }
 
-  // Step 4: Deploy CLI built-in skills (e.g. teamai-contribute)
+  // Step 4: Deploy CLI built-in skills
   if (!options.dryRun) {
     try {
       const { deployBuiltinSkills } = await import('./builtin-skills.js');
-      const deployed = await deployBuiltinSkills(freshConfig);
+      const deployed = await deployBuiltinSkills(freshConfig, localConfig);
       if (deployed > 0) {
-        log.debug(`Deployed ${deployed} built-in skill(s)`);
+        log.debug(`[${scopeLabel}] Deployed ${deployed} built-in skill(s)`);
       }
     } catch (e) {
-      log.debug(`Built-in skills deployment skipped: ${(e as Error).message}`);
+      log.debug(`[${scopeLabel}] Built-in skills deployment skipped: ${(e as Error).message}`);
     }
   }
 
-  // Step 4.5: Deploy CLI built-in rules (e.g. teamai-recall)
+  // Step 4.5: Deploy CLI built-in rules
   if (!options.dryRun) {
     try {
       const { deployBuiltinRules } = await import('./builtin-rules.js');
-      const deployed = await deployBuiltinRules(freshConfig);
+      const deployed = await deployBuiltinRules(freshConfig, localConfig);
       if (deployed > 0) {
-        log.debug(`Deployed built-in rules to ${deployed} tool(s)`);
+        log.debug(`[${scopeLabel}] Deployed built-in rules to ${deployed} tool(s)`);
       }
     } catch (e) {
-      log.debug(`Built-in rules deployment skipped: ${(e as Error).message}`);
+      log.debug(`[${scopeLabel}] Built-in rules deployment skipped: ${(e as Error).message}`);
     }
   }
 
-  // Step 5: Auto-report usage data to team repo (best-effort, non-blocking)
-  if (!options.dryRun) {
+  // Step 5: Auto-report usage data (user scope only)
+  if (!options.dryRun && localConfig.scope === 'user') {
     try {
       const { reportUsageToTeam } = await import('./team-push.js');
       await reportUsageToTeam(localConfig.repo.localPath, localConfig.username);
@@ -274,8 +290,8 @@ export async function pull(options: GlobalOptions): Promise<void> {
     }
   }
 
-  // Step 5: Show skill recommendations (if team stats available)
-  if (!options.silent && !options.dryRun) {
+  // Step 6: Show skill recommendations (user scope only)
+  if (!options.silent && !options.dryRun && localConfig.scope === 'user') {
     try {
       const YAML = (await import('yaml')).default;
       const { listFiles, readFileSafe } = await import('./utils/fs.js');
@@ -299,5 +315,34 @@ export async function pull(options: GlobalOptions): Promise<void> {
     } catch {
       // Recommendations are optional — don't fail pull
     }
+  }
+}
+
+/**
+ * Main pull entry point.
+ * Implements Scheme B: user scope is always pulled (baseline),
+ * project scope is additionally pulled if detected in cwd.
+ */
+export async function pull(options: GlobalOptions): Promise<void> {
+  // 1. Always try to pull user scope
+  try {
+    const userConfig = await loadLocalConfigForScope('user');
+    if (userConfig) {
+      await pullForScope(userConfig, options);
+    } else {
+      log.debug('No user-scope config found, skipping user pull');
+    }
+  } catch (e) {
+    log.warn(`User-scope pull error: ${(e as Error).message}`);
+  }
+
+  // 2. Detect and pull project scope if cwd has .teamai/config.yaml with scope='project'
+  try {
+    const projectConfig = await detectProjectConfig();
+    if (projectConfig) {
+      await pullForScope(projectConfig, options);
+    }
+  } catch (e) {
+    log.warn(`Project-scope pull error: ${(e as Error).message}`);
   }
 }

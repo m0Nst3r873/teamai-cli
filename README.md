@@ -1,6 +1,9 @@
 # TeamAI — 团队 AI 经验共享框架
 
 团队 AI 经验共享框架。自动在团队成员之间同步 skills、rules、docs 等 AI 工具配置。
+
+> 📖 **完整使用指南**：[docs/usage-guide.md](docs/usage-guide.md) — 涵盖从团队创建到日常使用的全流程。
+
 ## 如有问题或建议，欢迎提交 PR 或 Issue，一起共建这个项目
 ## 安装
 
@@ -13,8 +16,12 @@ npm install -g @tencent/teamai-cli --registry=http://r.tnpm.oa.com
 ### 团队成员
 
 ```bash
-# 初始化（关联团队仓库、注册成员、注入 hooks）
+# 用户级初始化（默认，资源安装到 ~/）
 teamai init --repo yourteam/yourproject
+
+# 项目级初始化（资源安装到项目目录下）
+cd /path/to/my-project
+teamai init --repo yourteam/yourproject --scope project
 ```
 
 ### 管理员
@@ -25,15 +32,15 @@ teamai init --repo yourteam/yourproject
 
 | 命令 | 说明 |
 |------|------|
-| `teamai init` | 初始化（自动安装 gf CLI、OAuth 登录、关联仓库、注册成员、配置 reviewers、注入 hooks） |
+| `teamai init [--scope <user\|project>]` | 初始化（自动安装 gf CLI、OAuth 登录、关联仓库、注册成员、配置 reviewers、注入 hooks） |
 | `teamai push [--all]` | 推送本地新资源到独立分支并创建 Merge Request |
-| `teamai pull [--silent]` | 拉取团队资源并注入到本地 AI 工具 |
+| `teamai pull [--silent]` | 拉取团队资源并注入到本地 AI 工具（支持双 scope 依次拉取） |
 | `teamai status` | 查看本地 vs 团队仓库差异 |
 | `teamai list [type]` | 列出资源（skills\|rules\|docs） |
 | `teamai members` | 列出已注册的团队成员 |
 | `teamai remove <type> <name>` | 从团队仓库和本地删除资源并创建 MR（skills\|rules） |
-| `teamai contribute --file <path>` | 将 AI 生成的经验文档推送到团队仓库 learnings/ |
-| `teamai recall <query>` | 搜索团队知识库，返回按相关性排名的结果 |
+| `teamai contribute --file <path> [--scope <user\|project>]` | 将 AI 生成的经验文档推送到团队仓库 learnings/（可指定目标 scope） |
+| `teamai recall <query>` | 搜索团队知识库，自动合并 user + project 双 scope 结果 |
 | `teamai digest` | 生成团队 AI 使用周报（skill 排行、新增/更新 skill、session 摘要） |
 | `teamai hooks` | 管理 AI 工具 hooks（list / inject / remove） |
 | `teamai doctor` | 诊断配置问题 |
@@ -68,6 +75,23 @@ teamai init --repo yourteam/yourproject
 - Skills 同步到 `~/.claude/skills/`、`~/.codex/skills/`、`~/.claude-internal/skills/`、`~/.cursor/skills/`、`~/.codebuddy/skills/`
 - Rules 同步到各工具的 rules 目录，并通过标记注释合并到 `CLAUDE.md`（支持 claude、claude-internal、codebuddy）
 - Docs 同步到 `~/.teamai/docs/`
+
+## Scope（作用域）
+
+TeamAI 支持两种 scope，可以共存：
+
+| 维度 | User Scope（默认） | Project Scope |
+|------|-------------------|---------------|
+| **资源安装位置** | `~/` 下（如 `~/.claude/skills/`） | 项目目录下（如 `<project>/.claude/skills/`） |
+| **配置文件** | `~/.teamai/config.yaml` | `<project>/.teamai/config.yaml` |
+| **适用场景** | 通用团队规范、跨项目技能 | 项目特定的技能和规则 |
+| **初始化** | `teamai init --repo <group>/<repo>` | `cd <project> && teamai init --repo <group>/<repo> --scope project` |
+
+**双 scope 协同：**
+- `teamai pull` 会依次拉取 user + project 两个 scope 的资源，互不冲突
+- `teamai contribute --scope user/project` 可显式选择推送到哪个仓库
+- `teamai recall` 自动合并两个 scope 的知识库，统一搜索排序，结果标注来源 `[user]`/`[project]`
+- 远端 `teamai.yaml` 的 `scope` 字段锁定仓库类型，成员 init 时必须匹配
 
 ## 经验自动分享
 
@@ -113,12 +137,17 @@ contribute(写入) → pull(同步+索引) → recall(搜索) → upvote(投票)
 
 ```bash
 $ teamai recall "fuse 端口"
-[1/1] MR 审查发现 FUSE 端口冲突 Bug ★1
+[1/2] MR 审查发现 FUSE 端口冲突 Bug ★1 [user]
 Author: jeffyxu | Score: 18.5 | Tags: troubleshooting, fuse, k8s
+
+[2/2] FUSE 部署配置最佳实践 [project]
+Author: alice | Score: 12.0 | Tags: fuse, deploy
 ```
 
+- **双 scope 合并搜索**：自动合并 user 和 project scope 的知识库，结果标注来源
 - Hybrid 中英文搜索（Intl.Segmenter + CJK bigrams）
 - 搜索自动投票，好文档自然浮到顶部
+- 投票按 scope 分别写入各自的 repo，归属正确
 
 ## 更新
 

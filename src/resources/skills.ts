@@ -1,6 +1,7 @@
 import path from 'node:path';
 import { ResourceHandler } from './base.js';
 import type { ResourceItem, ResourceItemStatus, TeamaiConfig, LocalConfig } from '../types.js';
+import { resolveBaseDir } from '../types.js';
 import { listDirs, pathExists, copyDir, remove, dirContentEqual, getDirLatestMtime, readFileSafe, writeFile } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 import { BUILTIN_SKILL_NAMES } from '../builtin-skills.js';
@@ -29,7 +30,7 @@ export class SkillsHandler extends ResourceHandler {
     // Scan each tool's skills directory
     for (const [_tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
       if (!toolPath.skills) continue;
-      const skillsDir = path.join(process.env.HOME ?? '', toolPath.skills);
+      const skillsDir = path.join(resolveBaseDir(localConfig), toolPath.skills);
       if (!await pathExists(skillsDir)) continue;
 
       const dirs = await listDirs(skillsDir);
@@ -125,19 +126,19 @@ export class SkillsHandler extends ResourceHandler {
   /**
    * Pull a skill from team repo to all configured AI tool directories.
    */
-  async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
-    const home = process.env.HOME ?? '';
+  async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<void> {
+    const baseDir = resolveBaseDir(localConfig);
 
     for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
       if (!toolPath.skills) continue;
 
       // Skip tools that are not installed
-      if (!await ResourceHandler.isToolInstalled(toolPath.skills)) {
+      if (!await ResourceHandler.isToolInstalled(toolPath.skills, baseDir)) {
         log.debug(`Skipping skill sync for ${tool}: tool not installed`);
         continue;
       }
 
-      const dest = path.join(home, toolPath.skills, item.name);
+      const dest = path.join(baseDir, toolPath.skills, item.name);
       try {
         await copyDir(item.sourcePath, dest);
         log.debug(`Synced skill ${item.name} → ${tool}`);
@@ -152,7 +153,7 @@ export class SkillsHandler extends ResourceHandler {
    */
   async removeItem(name: string, teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<string[]> {
     const removed: string[] = [];
-    const home = process.env.HOME ?? '';
+    const baseDir = resolveBaseDir(localConfig);
 
     // Remove from team repo
     const teamDir = path.join(localConfig.repo.localPath, 'skills', name);
@@ -167,7 +168,7 @@ export class SkillsHandler extends ResourceHandler {
     // Remove from each tool's skills directory
     for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
       if (!toolPath.skills) continue;
-      const skillDir = path.join(home, toolPath.skills, name);
+      const skillDir = path.join(baseDir, toolPath.skills, name);
       if (await pathExists(skillDir)) {
         await remove(skillDir);
         removed.push(skillDir);

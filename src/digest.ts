@@ -3,7 +3,7 @@ import path from 'node:path';
 import fs from 'node:fs';
 import { log } from './utils/logger.js';
 import { readFileSafe, listFiles } from './utils/fs.js';
-import { requireInit } from './config.js';
+import { requireInit, detectProjectConfig } from './config.js';
 import { calculateTeamHealth } from './skill-health.js';
 import { createGit } from './utils/git.js';
 import type { GlobalOptions, UserStats } from './types.js';
@@ -189,7 +189,8 @@ async function getRecentSessions(repoPath: string): Promise<string[]> {
  */
 export async function generateDigest(options: GlobalOptions): Promise<void> {
   try {
-    const { localConfig } = await requireInit();
+    const projectConfig = await detectProjectConfig();
+    const localConfig = projectConfig ?? (await requireInit()).localConfig;
     const repoPath = localConfig.repo.localPath;
 
     const teamStats = await loadTeamStats(repoPath);

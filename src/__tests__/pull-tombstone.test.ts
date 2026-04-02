@@ -8,6 +8,11 @@ vi.mock('../config.js', () => ({
   requireInit: vi.fn(),
   loadState: vi.fn().mockResolvedValue({ lastPull: null }),
   saveState: vi.fn(),
+  loadLocalConfigForScope: vi.fn(),
+  loadTeamConfig: vi.fn(),
+  detectProjectConfig: vi.fn().mockResolvedValue(null),
+  loadStateForScope: vi.fn().mockResolvedValue({ lastPull: null }),
+  saveStateForScope: vi.fn(),
 }));
 
 vi.mock('../utils/git.js', () => ({
@@ -34,7 +39,7 @@ vi.mock('../utils/logger.js', () => ({
 }));
 
 import { pull } from '../pull.js';
-import { requireInit } from '../config.js';
+import { loadLocalConfigForScope, loadTeamConfig, detectProjectConfig } from '../config.js';
 import type { TeamaiConfig, LocalConfig } from '../types.js';
 
 describe('pull tombstone cleanup', () => {
@@ -78,9 +83,12 @@ describe('pull tombstone cleanup', () => {
       repo: { localPath: repoPath, remote: 'https://git.woa.com/test/repo.git' },
       username: 'testuser',
       updatePolicy: 'auto',
+      scope: 'user',
     };
 
-    vi.mocked(requireInit).mockResolvedValue({ localConfig, teamConfig });
+    vi.mocked(loadLocalConfigForScope).mockResolvedValue(localConfig);
+    vi.mocked(loadTeamConfig).mockResolvedValue(teamConfig);
+    vi.mocked(detectProjectConfig).mockResolvedValue(null);
   });
 
   afterEach(async () => {

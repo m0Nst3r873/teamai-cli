@@ -2,7 +2,8 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { ensureDir, pathExists } from './utils/fs.js';
 import { log } from './utils/logger.js';
-import type { TeamaiConfig } from './types.js';
+import type { TeamaiConfig, LocalConfig } from './types.js';
+import { resolveBaseDir } from './types.js';
 
 // ─── Built-in skills deployment ──────────────────────────
 //
@@ -46,7 +47,7 @@ export const BUILTIN_SKILL_NAMES = new Set(['teamai-share-learnings']);
  * - Built-in skills directory doesn't exist (dev environment without build)
  * - A tool's skills directory is not configured
  */
-export async function deployBuiltinSkills(teamConfig: TeamaiConfig): Promise<number> {
+export async function deployBuiltinSkills(teamConfig: TeamaiConfig, localConfig?: LocalConfig): Promise<number> {
   const builtinDir = getBuiltinSkillsDir();
 
   if (!await pathExists(builtinDir)) {
@@ -72,13 +73,13 @@ export async function deployBuiltinSkills(teamConfig: TeamaiConfig): Promise<num
 
   if (skillNames.length === 0) return 0;
 
-  const home = process.env.HOME ?? '';
+  const baseDir = localConfig ? resolveBaseDir(localConfig) : (process.env.HOME ?? '');
   let deployed = 0;
 
   for (const [_tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
     if (!toolPath.skills) continue;
 
-    const targetSkillsDir = path.join(home, toolPath.skills);
+    const targetSkillsDir = path.join(baseDir, toolPath.skills);
 
     for (const skillName of skillNames) {
       const srcDir = path.join(builtinDir, skillName);

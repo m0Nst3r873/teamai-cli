@@ -3,7 +3,7 @@ import { ResourceHandler } from './base.js';
 import type { ResourceItem, ResourceItemStatus, TeamaiConfig, LocalConfig } from '../types.js';
 import { listFilesRecursive, pathExists, readFileSafe, writeFile, copyFile, ensureDir, remove, fileContentEqual, getFileMtime, listDirs } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
-import { TEAMAI_RULES_START, TEAMAI_RULES_END } from '../types.js';
+import { TEAMAI_RULES_START, TEAMAI_RULES_END, resolveBaseDir } from '../types.js';
 import { BUILTIN_RULE_NAMES } from '../builtin-rules.js';
 
 export class RulesHandler extends ResourceHandler {
@@ -34,7 +34,7 @@ export class RulesHandler extends ResourceHandler {
     for (const [_tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
       const rulesPath = toolPath.rules;
       if (!rulesPath) continue;
-      const rulesDir = path.join(process.env.HOME ?? '', rulesPath);
+      const rulesDir = path.join(resolveBaseDir(localConfig), rulesPath);
       if (!await pathExists(rulesDir)) continue;
 
       const files = await listFilesRecursive(rulesDir);
@@ -117,18 +117,18 @@ export class RulesHandler extends ResourceHandler {
   /**
    * Pull a single rule file to all configured AI tool rules/ directories.
    */
-  async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, _localConfig: LocalConfig): Promise<void> {
-    const home = process.env.HOME ?? '';
+  async pullItem(item: ResourceItem, teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<void> {
+    const baseDir = resolveBaseDir(localConfig);
     for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
       if (!toolPath.rules) continue;
 
       // Skip tools that are not installed
-      if (!await ResourceHandler.isToolInstalled(toolPath.rules)) {
+      if (!await ResourceHandler.isToolInstalled(toolPath.rules, baseDir)) {
         log.debug(`Skipping rule sync for ${tool}: tool not installed`);
         continue;
       }
 
-      const destDir = path.join(home, toolPath.rules);
+      const destDir = path.join(baseDir, toolPath.rules);
       await ensureDir(destDir);
       const dest = path.join(destDir, `${item.name}.md`);
       try {
@@ -145,7 +145,7 @@ export class RulesHandler extends ResourceHandler {
    */
   async removeItem(name: string, teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<string[]> {
     const removed: string[] = [];
-    const home = process.env.HOME ?? '';
+    const baseDir = resolveBaseDir(localConfig);
     const fileName = `${name}.md`;
 
     // Remove from team repo
@@ -161,7 +161,7 @@ export class RulesHandler extends ResourceHandler {
     // Remove from each tool's rules directory
     for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
       if (!toolPath.rules) continue;
-      const filePath = path.join(home, toolPath.rules, fileName);
+      const filePath = path.join(baseDir, toolPath.rules, fileName);
       if (await pathExists(filePath)) {
         await remove(filePath);
         removed.push(filePath);
@@ -190,12 +190,12 @@ export class RulesHandler extends ResourceHandler {
 
     // 1.5. Clean up stale local rule files not present in team repo
     const teamRuleFiles = new Set(rules.map((r) => `${r.name}.md`));
-    const home = process.env.HOME ?? '';
+    const baseDir = resolveBaseDir(localConfig);
     for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
       if (!toolPath.rules) continue;
-      if (!await ResourceHandler.isToolInstalled(toolPath.rules)) continue;
+      if (!await ResourceHandler.isToolInstalled(toolPath.rules, baseDir)) continue;
 
-      const destDir = path.join(home, toolPath.rules);
+      const destDir = path.join(baseDir, toolPath.rules);
       if (!await pathExists(destDir)) continue;
 
       const localFiles = await listFilesRecursive(destDir);
@@ -220,11 +220,14 @@ export class RulesHandler extends ResourceHandler {
       if (!toolPath.claudemd || !toolPath.rules) continue;
 
       // Skip tools that are not installed
-      if (!await ResourceHandler.isToolInstalled(toolPath.rules)) continue;
+      if (!await ResourceHandler.isToolInstalled(toolPath.rules, baseDir)) continue;
 
       // Reference the rules directory and docs directory
+      const rulesRef = localConfig.scope === 'project' && localConfig.projectRoot
+        ? `./${toolPath.rules}/`
+        : `~/${toolPath.rules}/`;
       const refs: string[] = [
-        `- ~/${toolPath.rules}/`,
+        `- ${rulesRef}`,
       ];
       const docsDir = teamConfig.sharing.docs.localDir;
       if (docsDir) {
@@ -244,7 +247,7 @@ export class RulesHandler extends ResourceHandler {
         TEAMAI_RULES_END,
       ].join('\n');
 
-      const claudeMdPath = path.join(home, toolPath.claudemd);
+      const claudeMdPath = path.join(baseDir, toolPath.claudemd);
       let existing = await readFileSafe(claudeMdPath) ?? '';
 
       const startIdx = existing.indexOf(TEAMAI_RULES_START);

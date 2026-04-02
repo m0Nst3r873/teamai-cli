@@ -1,4 +1,5 @@
 import { z } from 'zod';
+import path from 'node:path';
 
 // ─── Tool path config ───────────────────────────────────
 
@@ -8,6 +9,11 @@ export const ToolPathsSchema = z.object({
   settings: z.string().optional(),
   claudemd: z.string().optional(),
 });
+
+// ─── Scope ──────────────────────────────────────────────
+
+export const ScopeEnum = z.enum(['user', 'project']);
+export type Scope = z.infer<typeof ScopeEnum>;
 
 // ─── Team config (teamai.yaml) ───────────────────────────
 
@@ -31,6 +37,8 @@ export const TeamaiConfigSchema = z.object({
   repo: z.string(),
   /** Git hosting provider: 'tgit' | 'github'. Defaults to 'tgit' for backward compatibility. */
   provider: z.enum(['tgit', 'github']).default('tgit'),
+  /** Repo scope set at creation time; undefined = legacy repo (no restriction). */
+  scope: ScopeEnum.optional(),
   reviewers: z.array(z.string()).default([]),
   sharing: SharingConfigSchema.default({}),
   toolPaths: z.record(z.string(), ToolPathsSchema).default({
@@ -64,6 +72,9 @@ export const LocalConfigSchema = z.object({
   }),
   username: z.string(),
   updatePolicy: z.enum(['auto', 'prompt', 'skip']).default('auto'),
+  scope: ScopeEnum.default('user'),
+  /** Absolute path to project root; required when scope is 'project'. */
+  projectRoot: z.string().optional(),
 });
 
 export type LocalConfig = z.infer<typeof LocalConfigSchema>;
@@ -334,3 +345,43 @@ export interface UserVotes {
 export const LEARNINGS_LOCAL_DIR = `${TEAMAI_HOME}/learnings`;
 export const SEARCH_INDEX_PATH = `${TEAMAI_HOME}/search-index.json`;
 export const VOTES_LOCAL_DIR = `${TEAMAI_HOME}/votes`;
+
+// ─── Scope helpers ─────────────────────────────────────
+
+/**
+ * Resolve the base directory for resource installation based on scope.
+ * - user scope  → process.env.HOME (e.g. /Users/xxx)
+ * - project scope → localConfig.projectRoot (e.g. /Users/xxx/my-project)
+ */
+export function resolveBaseDir(localConfig: LocalConfig): string {
+  if (localConfig.scope === 'project' && localConfig.projectRoot) {
+    return localConfig.projectRoot;
+  }
+  return process.env.HOME!;
+}
+
+/**
+ * Get the .teamai home directory for a given scope.
+ * - user scope  → ~/.teamai (evaluated at call time for test compatibility)
+ * - project scope → <projectRoot>/.teamai
+ */
+export function getTeamaiHome(scope: Scope, projectRoot?: string): string {
+  if (scope === 'project' && projectRoot) {
+    return path.join(projectRoot, '.teamai');
+  }
+  return path.join(process.env.HOME ?? '', '.teamai');
+}
+
+/**
+ * Get the config.yaml path for a given scope.
+ */
+export function getConfigPath(scope: Scope, projectRoot?: string): string {
+  return path.join(getTeamaiHome(scope, projectRoot), 'config.yaml');
+}
+
+/**
+ * Get the state.json path for a given scope.
+ */
+export function getStatePath(scope: Scope, projectRoot?: string): string {
+  return path.join(getTeamaiHome(scope, projectRoot), 'state.json');
+}
