@@ -147,7 +147,15 @@ tagsCmd
 
 tagsCmd
   .command('add <type> <name> <tags...>')
-  .description('Add tags to a skill or rule in tags.yaml (admin)')
+  .description(
+    'Add tags to a skill or rule in tags.yaml (admin)\n\n' +
+      '  <type>  Resource type: "skills" or "rules"\n' +
+      '  <name>  Name of the skill or rule (directory name)\n' +
+      '  <tags>  One or more tags to add\n\n' +
+      '  Examples:\n' +
+      '    $ teamai tags add skills hai-deploy hai infra\n' +
+      '    $ teamai tags add rules common-coding-style coding best-practices\n',
+  )
   .action(async (type: string, name: string, tags: string[]) => {
     const globalOpts = program.opts() as GlobalOptions;
     if (type !== 'skills' && type !== 'rules') {
@@ -160,7 +168,15 @@ tagsCmd
 
 tagsCmd
   .command('remove <type> <name> <tags...>')
-  .description('Remove tags from a skill or rule in tags.yaml (admin)')
+  .description(
+    'Remove tags from a skill or rule in tags.yaml (admin)\n\n' +
+      '  <type>  Resource type: "skills" or "rules"\n' +
+      '  <name>  Name of the skill or rule (directory name)\n' +
+      '  <tags>  One or more tags to remove\n\n' +
+      '  Examples:\n' +
+      '    $ teamai tags remove skills hai-deploy infra\n' +
+      '    $ teamai tags remove rules common-coding-style best-practices\n',
+  )
   .action(async (type: string, name: string, tags: string[]) => {
     const globalOpts = program.opts() as GlobalOptions;
     if (type !== 'skills' && type !== 'rules') {
