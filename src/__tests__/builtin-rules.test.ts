@@ -25,12 +25,11 @@ describe('builtin-rules', () => {
     });
 
     describe('deployBuiltinRules', () => {
-        it('should deploy teamai-recall.md to all configured tool rules directories', async () => {
-            // Arrange: create tool rules directories
+        it('should clean up legacy teamai-recall.md files', async () => {
+            // Arrange: create tool rules directories with legacy rule
             const claudeRulesDir = path.join(tmpDir, '.claude', 'rules');
-            const claudeInternalRulesDir = path.join(tmpDir, '.claude-internal', 'rules');
             fs.mkdirSync(claudeRulesDir, { recursive: true });
-            fs.mkdirSync(claudeInternalRulesDir, { recursive: true });
+            fs.writeFileSync(path.join(claudeRulesDir, 'teamai-recall.md'), 'old recall rule', 'utf-8');
 
             const teamConfig = {
                 toolPaths: {
@@ -40,32 +39,15 @@ describe('builtin-rules', () => {
                         settings: '.claude/settings.json',
                         claudemd: '.claude/CLAUDE.md',
                     },
-                    'claude-internal': {
-                        skills: '.claude-internal/skills',
-                        rules: '.claude-internal/rules',
-                        settings: '.claude-internal/settings.json',
-                        claudemd: '.claude-internal/CLAUDE.md',
-                    },
                 },
             } as any;
 
             // Act
             const { deployBuiltinRules } = await import('../builtin-rules.js');
-            const deployed = await deployBuiltinRules(teamConfig);
+            await deployBuiltinRules(teamConfig);
 
-            // Assert
-            expect(deployed).toBeGreaterThan(0);
-
-            const claudeRuleFile = path.join(claudeRulesDir, 'teamai-recall.md');
-            const claudeInternalRuleFile = path.join(claudeInternalRulesDir, 'teamai-recall.md');
-
-            expect(fs.existsSync(claudeRuleFile)).toBe(true);
-            expect(fs.existsSync(claudeInternalRuleFile)).toBe(true);
-
-            // Verify content contains recall instructions
-            const content = fs.readFileSync(claudeRuleFile, 'utf-8');
-            expect(content).toContain('teamai recall');
-            expect(content).toContain('Bash');
+            // Assert: legacy file is removed
+            expect(fs.existsSync(path.join(claudeRulesDir, 'teamai-recall.md'))).toBe(false);
         });
 
         it('should skip tool directories that do not exist (tool not installed)', async () => {
@@ -95,17 +77,14 @@ describe('builtin-rules', () => {
             const { deployBuiltinRules } = await import('../builtin-rules.js');
             const deployed = await deployBuiltinRules(teamConfig);
 
-            // Assert: only claude got deployed
+            // Assert: only claude dir processed
             expect(deployed).toBe(1);
-            expect(fs.existsSync(path.join(claudeRulesDir, 'teamai-recall.md'))).toBe(true);
-            expect(fs.existsSync(path.join(tmpDir, '.cursor', 'rules', 'teamai-recall.md'))).toBe(false);
         });
 
-        it('should overwrite existing teamai-recall.md on update', async () => {
-            // Arrange: create tool dir with old rule file
+        it('should not fail when legacy file does not exist', async () => {
+            // Arrange: create tool dir without legacy file
             const claudeRulesDir = path.join(tmpDir, '.claude', 'rules');
             fs.mkdirSync(claudeRulesDir, { recursive: true });
-            fs.writeFileSync(path.join(claudeRulesDir, 'teamai-recall.md'), 'old content', 'utf-8');
 
             const teamConfig = {
                 toolPaths: {
@@ -116,21 +95,17 @@ describe('builtin-rules', () => {
                 },
             } as any;
 
-            // Act
+            // Act & Assert: should not throw
             const { deployBuiltinRules } = await import('../builtin-rules.js');
-            await deployBuiltinRules(teamConfig);
-
-            // Assert: content is updated
-            const content = fs.readFileSync(path.join(claudeRulesDir, 'teamai-recall.md'), 'utf-8');
-            expect(content).not.toBe('old content');
-            expect(content).toContain('teamai recall');
+            const deployed = await deployBuiltinRules(teamConfig);
+            expect(deployed).toBe(1);
         });
     });
 
     describe('BUILTIN_RULE_NAMES', () => {
-        it('should contain teamai-recall', async () => {
+        it('should be empty (no built-in rules deployed after recall rule removal)', async () => {
             const { BUILTIN_RULE_NAMES } = await import('../builtin-rules.js');
-            expect(BUILTIN_RULE_NAMES.has('teamai-recall')).toBe(true);
+            expect(BUILTIN_RULE_NAMES.size).toBe(0);
         });
     });
 });

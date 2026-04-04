@@ -278,8 +278,14 @@ export async function contributeCheck(toolArg?: string): Promise<void> {
     `总结文档将保存到团队仓库的 learnings/ 目录。`,
   ].join('');
 
-  // STDOUT goes to Claude Code as hook output → AI context
-  process.stdout.write(hint);
+  // Output via PostToolUse additionalContext JSON so Claude sees it
+  const hookOutput = JSON.stringify({
+    hookSpecificOutput: {
+      hookEventName: 'PostToolUse',
+      additionalContext: hint,
+    },
+  });
+  process.stdout.write(hookOutput);
 }
 
 /**

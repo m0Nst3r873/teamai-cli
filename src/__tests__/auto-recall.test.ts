@@ -2,9 +2,13 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
+import { execSync } from 'node:child_process';
 import {
     containsError,
     extractQuery,
+    extractGrepQuery,
+    extractWebSearchQuery,
+    extractWebFetchQuery,
     shouldSkipQuery,
 } from '../auto-recall.js';
 
@@ -146,6 +150,117 @@ ModuleNotFoundError: No module named 'sglang'`;
     });
 });
 
+// ─── extractGrepQuery ──────────────────────────────────────
+
+describe('extractGrepQuery', () => {
+    it('extracts plain text pattern', () => {
+        const query = extractGrepQuery({ pattern: 'ModuleNotFoundError' });
+        expect(query).toBe('ModuleNotFoundError');
+    });
+
+    it('strips regex metacharacters', () => {
+        const query = extractGrepQuery({ pattern: 'function\\s+\\w+\\(' });
+        expect(query).not.toContain('\\');
+        expect(query).toContain('function');
+    });
+
+    it('handles complex regex patterns', () => {
+        const query = extractGrepQuery({ pattern: '^import.*from\\s+["\'](.+)["\']' });
+        expect(query).toContain('import');
+        expect(query).toContain('from');
+    });
+
+    it('returns empty for missing pattern', () => {
+        expect(extractGrepQuery({})).toBe('');
+        expect(extractGrepQuery({ pattern: 123 })).toBe('');
+    });
+
+    it('returns empty for very short pattern', () => {
+        expect(extractGrepQuery({ pattern: 'ab' })).toBe('');
+    });
+
+    it('truncates very long patterns', () => {
+        const query = extractGrepQuery({ pattern: 'word'.repeat(50) });
+        expect(query.length).toBeLessThanOrEqual(120);
+    });
+});
+
+// ─── extractWebSearchQuery ─────────────────────────────────
+
+describe('extractWebSearchQuery', () => {
+    it('returns query as-is for natural language', () => {
+        const query = extractWebSearchQuery({ query: 'K8s pod restart OOM' });
+        expect(query).toBe('K8s pod restart OOM');
+    });
+
+    it('returns empty for missing query', () => {
+        expect(extractWebSearchQuery({})).toBe('');
+        expect(extractWebSearchQuery({ query: 42 })).toBe('');
+    });
+
+    it('returns empty for very short query', () => {
+        expect(extractWebSearchQuery({ query: 'ab' })).toBe('');
+    });
+
+    it('truncates very long queries', () => {
+        const query = extractWebSearchQuery({ query: 'word '.repeat(50) });
+        expect(query.length).toBeLessThanOrEqual(120);
+    });
+
+    it('trims whitespace', () => {
+        const query = extractWebSearchQuery({ query: '  some search query  ' });
+        expect(query).toBe('some search query');
+    });
+});
+
+// ─── extractWebFetchQuery ──────────────────────────────────
+
+describe('extractWebFetchQuery', () => {
+    it('prefers prompt over URL', () => {
+        const query = extractWebFetchQuery({
+            url: 'https://example.com/docs/api',
+            prompt: 'Find the authentication section',
+        });
+        expect(query).toBe('Find the authentication section');
+    });
+
+    it('falls back to URL path when no prompt', () => {
+        const query = extractWebFetchQuery({
+            url: 'https://docs.example.com/kubernetes/troubleshooting',
+        });
+        expect(query).toContain('kubernetes');
+        expect(query).toContain('troubleshooting');
+    });
+
+    it('returns empty for missing url and prompt', () => {
+        expect(extractWebFetchQuery({})).toBe('');
+    });
+
+    it('returns empty for URL with no meaningful path', () => {
+        expect(extractWebFetchQuery({ url: 'https://www.example.com/' })).toBe('');
+    });
+
+    it('filters out common URL noise words', () => {
+        const query = extractWebFetchQuery({
+            url: 'https://www.example.com/docs/index.html',
+        });
+        expect(query).not.toContain('html');
+        expect(query).not.toContain('www');
+    });
+
+    it('handles invalid URL gracefully', () => {
+        expect(extractWebFetchQuery({ url: 'not a url' })).toBe('');
+    });
+
+    it('truncates long prompts', () => {
+        const query = extractWebFetchQuery({
+            url: 'https://example.com',
+            prompt: 'word '.repeat(50),
+        });
+        expect(query.length).toBeLessThanOrEqual(120);
+    });
+});
+
 // ─── shouldSkipQuery (dedup + rate limiting) ───────────────
 
 describe('shouldSkipQuery', () => {
@@ -176,16 +291,90 @@ describe('shouldSkipQuery', () => {
         expect(shouldSkipQuery('session-3', 'query two')).toBe(false);
     });
 
-    it('rate limits after 5 recalls per session', () => {
-        for (let i = 0; i < 5; i++) {
+    it('rate limits after 10 recalls per session', () => {
+        for (let i = 0; i < 10; i++) {
             shouldSkipQuery('session-4', `unique query ${i}`);
         }
-        // 6th query should be blocked
+        // 11th query should be blocked
         expect(shouldSkipQuery('session-4', 'one more query')).toBe(true);
     });
 
     it('sessions do not interfere with each other', () => {
         shouldSkipQuery('session-5a', 'same error');
         expect(shouldSkipQuery('session-5b', 'same error')).toBe(false);
+    });
+});
+
+// ─── CLI integration: STDIN parsing + JSON output ──────────
+
+describe('auto-recall CLI integration', () => {
+    const CLI_PATH = path.resolve(__dirname, '../../dist/index.js');
+
+    // Skip if not built
+    const cliExists = fs.existsSync(CLI_PATH);
+
+    it.skipIf(!cliExists)('outputs valid JSON with additionalContext for Grep', () => {
+        const input = JSON.stringify({
+            tool_name: 'Grep',
+            tool_input: { pattern: 'K8s deployment troubleshooting' },
+            tool_response: { stdout: 'no matches' },
+        });
+        const result = execSync(`echo '${input}' | node ${CLI_PATH} auto-recall --stdin 2>/dev/null`, {
+            encoding: 'utf-8',
+            timeout: 10000,
+        }).trim();
+
+        // May be empty if no search index — only validate format when output exists
+        if (result) {
+            const parsed = JSON.parse(result);
+            expect(parsed.hookSpecificOutput).toBeDefined();
+            expect(parsed.hookSpecificOutput.hookEventName).toBe('PostToolUse');
+            expect(typeof parsed.hookSpecificOutput.additionalContext).toBe('string');
+            expect(parsed.hookSpecificOutput.additionalContext).toContain('[teamai:auto-recall]');
+        }
+    });
+
+    it.skipIf(!cliExists)('outputs nothing for unknown tools (fast path)', () => {
+        const input = JSON.stringify({
+            tool_name: 'Write',
+            tool_input: { file_path: '/tmp/test.ts', content: 'hello' },
+            tool_response: { stdout: '' },
+        });
+        const result = execSync(`echo '${input}' | node ${CLI_PATH} auto-recall --stdin 2>/dev/null`, {
+            encoding: 'utf-8',
+            timeout: 5000,
+        }).trim();
+
+        expect(result).toBe('');
+    });
+
+    it.skipIf(!cliExists)('parses tool_input correctly when missing', () => {
+        const input = JSON.stringify({
+            tool_name: 'Grep',
+            // No tool_input field
+            tool_response: { stdout: '' },
+        });
+        // Should not throw — gracefully returns empty query
+        const result = execSync(`echo '${input}' | node ${CLI_PATH} auto-recall --stdin 2>/dev/null`, {
+            encoding: 'utf-8',
+            timeout: 5000,
+        }).trim();
+
+        // No output expected (empty pattern → empty query → skip)
+        expect(result).toBe('');
+    });
+
+    it.skipIf(!cliExists)('parses tool_input correctly when null', () => {
+        const input = JSON.stringify({
+            tool_name: 'WebSearch',
+            tool_input: null,
+            tool_response: { stdout: '' },
+        });
+        const result = execSync(`echo '${input}' | node ${CLI_PATH} auto-recall --stdin 2>/dev/null`, {
+            encoding: 'utf-8',
+            timeout: 5000,
+        }).trim();
+
+        expect(result).toBe('');
     });
 });

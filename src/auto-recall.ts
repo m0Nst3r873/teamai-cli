@@ -4,28 +4,34 @@ import { log } from './utils/logger.js';
 
 // ─── Auto-recall data flow ──────────────────────────────
 //
-//  PostToolUse hook (every tool call)
+//  PostToolUse hook (matcher: '*', every tool call)
 //      │
 //      ▼
 //  teamai auto-recall --stdin
 //      │
-//      ├─ Read STDIN JSON (tool_name, tool_output)
-//      ├─ Quick check: tool_output contains error pattern?
-//      │   ├─ NO → exit(0), no STDOUT (< 5ms)
-//      │   └─ YES → extract error keywords as query
-//      │           │
-//      │           ▼
-//      │       search(query, index) ← lazy import
-//      │           │
-//      │           ▼
-//      │       Has results? → STDOUT formatted output
-//      │       No results? → exit(0), no STDOUT
+//      ├─ Read STDIN JSON { tool_name, tool_input, tool_response }
 //      │
-//      ▼
-//  Claude reads hook STDOUT → sees team knowledge base matches
+//      ├─ tool_name dispatch (fast path: unknown tools → exit <1ms)
+//      │   ├─ 'Bash'      → containsError(output)? → extractQuery(output)
+//      │   ├─ 'Grep'      → extractGrepQuery(tool_input)
+//      │   ├─ 'WebSearch'  → extractWebSearchQuery(tool_input)
+//      │   ├─ 'WebFetch'   → extractWebFetchQuery(tool_input)
+//      │   └─ *            → exit(0), no-op
+//      │
+//      ├─ shouldSkipQuery(sessionId, query)  ← dedup + rate limit
+//      │
+//      ├─ search(query, index) ← lazy import
+//      │
+//      └─ Has results? → STDOUT JSON { additionalContext }
+//         No results? → exit(0), no STDOUT
 //
 
-// ─── Error detection patterns ────────────────────────────
+// ─── Tool whitelist ────────────────────────────────────
+
+/** Tools that trigger auto-recall. */
+const RECALL_TOOLS = new Set(['Bash', 'Grep', 'WebSearch', 'WebFetch']);
+
+// ─── Error detection patterns (Bash only) ──────────────
 
 /** Patterns that indicate an error in tool output. */
 const ERROR_PATTERNS: RegExp[] = [
@@ -82,12 +88,12 @@ const FALSE_POSITIVE_PATTERNS: RegExp[] = [
 const MAX_SCAN_LENGTH = 5000;
 
 /** Maximum number of auto-recalls per session. */
-const MAX_RECALLS_PER_SESSION = 5;
+const MAX_RECALLS_PER_SESSION = 10;
 
 /** Session recall cache file TTL (24 hours). */
 const CACHE_TTL_MS = 24 * 60 * 60 * 1000;
 
-// ─── Error detection ─────────────────────────────────────
+// ─── Error detection (Bash path) ─────────────────────────
 
 /**
  * Check if tool output contains error patterns.
@@ -177,6 +183,82 @@ export function extractQuery(output: string): string {
     }
 
     return query;
+}
+
+// ─── Search tool query extractors ────────────────────────
+
+/**
+ * Extract a search query from Grep tool_input.
+ *
+ * Grep input format: { pattern: string, path?: string, glob?: string, ... }
+ * Strips regex metacharacters to get meaningful search words.
+ */
+export function extractGrepQuery(toolInput: Record<string, unknown>): string {
+    const pattern = typeof toolInput.pattern === 'string' ? toolInput.pattern : '';
+    if (!pattern) return '';
+
+    // Strip common regex metacharacters, keep word content
+    const query = pattern
+        .replace(/[\\^$.*+?()[\]{}|]/g, ' ')
+        .replace(/\\[bBdDwWsS]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+    if (query.length < 3) return '';
+    if (query.length > 120) return query.slice(0, 120).trim();
+
+    return query;
+}
+
+/**
+ * Extract a search query from WebSearch tool_input.
+ *
+ * WebSearch input format: { query: string, ... }
+ * The query is already natural language — use as-is.
+ */
+export function extractWebSearchQuery(toolInput: Record<string, unknown>): string {
+    const query = typeof toolInput.query === 'string' ? toolInput.query : '';
+    if (!query || query.trim().length < 3) return '';
+
+    const trimmed = query.trim();
+    if (trimmed.length > 120) return trimmed.slice(0, 120).trim();
+
+    return trimmed;
+}
+
+/**
+ * Extract a search query from WebFetch tool_input.
+ *
+ * WebFetch input format: { url: string, prompt: string }
+ * Prefer prompt (descriptive), fallback to URL path segments.
+ */
+export function extractWebFetchQuery(toolInput: Record<string, unknown>): string {
+    // Prefer prompt — it describes what the user wants to find
+    const prompt = typeof toolInput.prompt === 'string' ? toolInput.prompt : '';
+    if (prompt && prompt.trim().length >= 3) {
+        const trimmed = prompt.trim();
+        if (trimmed.length > 120) return trimmed.slice(0, 120).trim();
+        return trimmed;
+    }
+
+    // Fallback: extract meaningful words from URL path
+    const url = typeof toolInput.url === 'string' ? toolInput.url : '';
+    if (!url) return '';
+
+    try {
+        const parsed = new URL(url);
+        const pathWords = parsed.pathname
+            .split(/[/\-_.]+/)
+            .filter((w) => w.length > 2)
+            .filter((w) => !/^(www|com|org|net|io|html|htm|php|asp|jsx?)$/i.test(w))
+            .join(' ');
+
+        if (pathWords.length < 3) return '';
+        if (pathWords.length > 120) return pathWords.slice(0, 120).trim();
+        return pathWords;
+    } catch {
+        return '';
+    }
 }
 
 // ─── Deduplication cache ─────────────────────────────────
@@ -271,6 +353,7 @@ export function shouldSkipQuery(sessionId: string, query: string): boolean {
 
 interface HookInput {
     toolName: string;
+    toolInput: Record<string, unknown>;
     toolOutput: string;
     sessionId: string;
 }
@@ -294,6 +377,13 @@ export async function readStdin(): Promise<HookInput | null> {
 
         const toolName = typeof data.tool_name === 'string' ? data.tool_name : '';
 
+        // Parse tool_input (the parameters passed to the tool)
+        const rawInput = data.tool_input;
+        const toolInput: Record<string, unknown> =
+            rawInput !== null && typeof rawInput === 'object' && !Array.isArray(rawInput)
+                ? rawInput as Record<string, unknown>
+                : {};
+
         // Claude Code PostToolUse STDIN format:
         //   { tool_name, tool_input, tool_response: { stdout, stderr } }
         // Other formats may use tool_output or tool_result directly.
@@ -315,7 +405,7 @@ export async function readStdin(): Promise<HookInput | null> {
             process.env.CLAUDE_SESSION_ID ||
             `pid-${process.ppid ?? process.pid}`;
 
-        return { toolName, toolOutput, sessionId };
+        return { toolName, toolInput, toolOutput, sessionId };
     } catch {
         return null;
     }
@@ -327,12 +417,18 @@ export async function readStdin(): Promise<HookInput | null> {
  * Handle `teamai auto-recall --stdin`.
  * Called by PostToolUse hook on every tool call.
  *
- * Performance contract:
- * - No error detected: < 50ms (no index load, no search)
- * - Error detected + search: < 200ms typical
+ * Dispatch by tool type:
+ * - Bash: error detection → extract error keywords → search
+ * - Grep/WebSearch/WebFetch: extract search query from tool_input → search
+ * - Other tools: exit immediately (fast path <1ms)
  *
- * Output: STDOUT when error detected and matching results found.
- * Claude Code reads hook STDOUT and passes it to AI as context.
+ * Performance contract:
+ * - Unknown tool: < 1ms (no I/O)
+ * - Known tool, no query: < 5ms
+ * - Known tool + search: < 200ms typical
+ *
+ * Output: STDOUT JSON with hookSpecificOutput.additionalContext when matching results found.
+ * Claude Code reads additionalContext and passes it to AI as context.
  */
 export async function autoRecall(): Promise<void> {
     const input = await readStdin();
@@ -341,17 +437,32 @@ export async function autoRecall(): Promise<void> {
         return;
     }
 
-    const { toolOutput, sessionId } = input;
+    const { toolName, toolInput, toolOutput, sessionId } = input;
 
-    // Fast path: no error detected → exit immediately
-    if (!containsError(toolOutput)) {
+    // Fast path: unknown tools → exit immediately
+    if (!RECALL_TOOLS.has(toolName)) {
         return;
     }
 
-    // Extract search query from error
-    const query = extractQuery(toolOutput);
+    // ─── Extract query based on tool type ────────────────
+    let query = '';
+
+    if (toolName === 'Bash') {
+        // Bash: only recall on errors
+        if (!containsError(toolOutput)) {
+            return;
+        }
+        query = extractQuery(toolOutput);
+    } else if (toolName === 'Grep') {
+        query = extractGrepQuery(toolInput);
+    } else if (toolName === 'WebSearch') {
+        query = extractWebSearchQuery(toolInput);
+    } else if (toolName === 'WebFetch') {
+        query = extractWebFetchQuery(toolInput);
+    }
+
     if (!query) {
-        log.debug('auto-recall: could not extract query from error');
+        log.debug(`auto-recall: no query extracted from ${toolName}`);
         return;
     }
 
@@ -379,10 +490,23 @@ export async function autoRecall(): Promise<void> {
         return;
     }
 
-    // Format and output results
-    const header = `[teamai:auto-recall] 检测到错误，自动搜索团队知识库 (query: "${query.slice(0, 60)}")\n\n`;
+    // Log successful recall with titles for debuggability
+    const titles = results.map((r) => r.entry.title).join(', ');
+    log.debug(`auto-recall: [${toolName}] query="${query.slice(0, 60)}" → ${results.length} results: ${titles}`);
+
+    // Format and output results via PostToolUse additionalContext JSON
+    const source = toolName === 'Bash' ? '检测到错误' : `伴随 ${toolName} 搜索`;
+    const header = `[teamai:auto-recall] ${source}，自动搜索团队知识库 (query: "${query.slice(0, 60)}")\n\n`;
     const formatted = formatResults(results);
-    process.stdout.write(header + formatted + '\n');
+    const context = (header + formatted).slice(0, 10000); // additionalContext limit
+
+    const hookOutput = JSON.stringify({
+        hookSpecificOutput: {
+            hookEventName: 'PostToolUse',
+            additionalContext: context,
+        },
+    });
+    process.stdout.write(hookOutput + '\n');
 
     // Best-effort auto-upvote (non-blocking)
     try {
