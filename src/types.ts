@@ -91,6 +91,8 @@ export type LocalConfigInput = z.input<typeof LocalConfigSchema>;
 export const StateSchema = z.object({
   lastPush: z.string().nullable().default(null),
   lastPull: z.string().nullable().default(null),
+  /** Git commit hash (short) of the team repo at the time of last successful pull. */
+  lastPullRev: z.string().nullable().default(null),
   pushedRules: z.array(z.string()).default([]),
   pushedSkills: z.array(z.string()).default([]),
   pushedEnvVars: z.array(z.string()).default([]),
@@ -147,6 +149,8 @@ export interface GlobalOptions {
   dryRun?: boolean;
   verbose?: boolean;
   silent?: boolean;
+  /** Force full sync even when repo HEAD matches lastPullRev. */
+  force?: boolean;
 }
 
 // ─── Constants ──────────────────────────────────────────

@@ -56,6 +56,14 @@ export async function configureGitUser(
   }
 }
 
+/**
+ * Get the current HEAD commit hash (short form) of a repo.
+ */
+export async function getHeadRev(localPath: string): Promise<string> {
+  const git = createGit(localPath);
+  return git.revparse(['--short', 'HEAD']);
+}
+
 export async function pullRepo(localPath: string): Promise<string> {
   const git = createGit(localPath);
   const result = await git.pull();

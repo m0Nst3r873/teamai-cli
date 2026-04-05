@@ -1,7 +1,7 @@
 import path from 'node:path';
 import fse from 'fs-extra';
 import { requireInit, loadState, saveState, detectProjectConfig, loadLocalConfigForScope, loadTeamConfig, loadStateForScope, saveStateForScope } from './config.js';
-import { pullRepo } from './utils/git.js';
+import { pullRepo, getHeadRev } from './utils/git.js';
 import { log, spinner } from './utils/logger.js';
 import { pathExists, remove, listFiles, listDirs } from './utils/fs.js';
 import { getHandler, RulesHandler, DocsHandler, EnvHandler } from './resources/index.js';
@@ -194,6 +194,21 @@ async function pullForScope(
   } catch (e) {
     pullSpin.fail(`[${scopeLabel}] Pull failed: ${(e as Error).message}`);
     return;
+  }
+
+  // Step 1b: Skip sync if repo HEAD hasn't changed since last pull
+  if (!options.force && !options.dryRun) {
+    try {
+      const currentRev = await getHeadRev(localConfig.repo.localPath);
+      const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
+      if (state.lastPullRev && state.lastPullRev === currentRev) {
+        log.success(`[${scopeLabel}] Already synced at ${currentRev}, skipping`);
+        return;
+      }
+    } catch {
+      // If rev check fails, proceed with full sync
+      log.debug(`[${scopeLabel}] Rev check failed, proceeding with full sync`);
+    }
   }
 
   // Reload team config after pull (might have changed)
@@ -395,6 +410,12 @@ async function pullForScope(
   } else if (!options.dryRun) {
     const state = await loadStateForScope(localConfig.scope, localConfig.projectRoot);
     state.lastPull = new Date().toISOString();
+    try {
+      state.lastPullRev = await getHeadRev(localConfig.repo.localPath);
+    } catch {
+      // Non-critical: if we can't get the rev, just clear it
+      state.lastPullRev = null;
+    }
     await saveStateForScope(state, localConfig.scope, localConfig.projectRoot);
   }
 

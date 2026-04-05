@@ -45,6 +45,7 @@ program
   .command('pull')
   .description('Pull team resources and inject into local AI tools')
   .option('--silent', 'Silent mode (for hooks)')
+  .option('--force', 'Force full sync even if repo is unchanged')
   .action(async (cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;
     if (cmdOpts.silent) setSilent(true);

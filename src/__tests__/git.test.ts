@@ -43,7 +43,7 @@ vi.mock('../utils/logger.js', () => ({
   },
 }));
 
-import { generateBranchName, pushRepoBranch, checkoutMaster, pushRepoDirectly, initRepo, configureGitUser } from '../utils/git.js';
+import { generateBranchName, pushRepoBranch, checkoutMaster, pushRepoDirectly, initRepo, configureGitUser, getHeadRev } from '../utils/git.js';
 import fse from 'fs-extra';
 
 describe('generateBranchName', () => {
@@ -182,5 +182,20 @@ describe('configureGitUser', () => {
 
     expect(mockGit.addConfig).toHaveBeenCalledWith('user.name', 'Charlie');
     expect(mockGit.addConfig).toHaveBeenCalledWith('user.email', 'charlie@custom.com');
+  });
+});
+
+describe('getHeadRev', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('should return the short HEAD commit hash', async () => {
+    mockGit.revparse.mockResolvedValue('a1b2c3d');
+
+    const rev = await getHeadRev('/repo');
+
+    expect(rev).toBe('a1b2c3d');
+    expect(mockGit.revparse).toHaveBeenCalledWith(['--short', 'HEAD']);
   });
 });
