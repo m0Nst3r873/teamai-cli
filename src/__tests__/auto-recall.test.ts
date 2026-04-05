@@ -10,6 +10,7 @@ import {
     extractWebSearchQuery,
     extractWebFetchQuery,
     shouldSkipQuery,
+    isReadOnlyCommand,
 } from '../auto-recall.js';
 
 // ─── Test helpers ──────────────────────────────────────────
@@ -104,6 +105,20 @@ const error_code = getErrorCode();`;
 
     it('ignores JSON key "error":', () => {
         const output = '{"error": null, "data": {"id": 1}}';
+        expect(containsError(output)).toBe(false);
+    });
+
+    it('ignores "Error Handling" as a topic heading in file content', () => {
+        // When "Error Handling" is the only error-like pattern,
+        // the false positive pattern should suppress it.
+        const output = `# Project TODOS
+
+## Error Handling
+- Add retry logic for API calls
+- Improve validation messages
+
+## Performance
+- Cache frequently accessed data`;
         expect(containsError(output)).toBe(false);
     });
 });
@@ -258,6 +273,48 @@ describe('extractWebFetchQuery', () => {
             prompt: 'word '.repeat(50),
         });
         expect(query.length).toBeLessThanOrEqual(120);
+    });
+});
+
+// ─── isReadOnlyCommand ────────────────────────────────────────
+
+describe('isReadOnlyCommand', () => {
+    it('detects cat as read-only', () => {
+        expect(isReadOnlyCommand('cat TODOS.md')).toBe(true);
+    });
+
+    it('detects head as read-only', () => {
+        expect(isReadOnlyCommand('head -n 50 /tmp/log.txt')).toBe(true);
+    });
+
+    it('detects tail as read-only', () => {
+        expect(isReadOnlyCommand('tail -f /var/log/syslog')).toBe(true);
+    });
+
+    it('detects less as read-only', () => {
+        expect(isReadOnlyCommand('less README.md')).toBe(true);
+    });
+
+    it('detects bat as read-only', () => {
+        expect(isReadOnlyCommand('bat src/index.ts')).toBe(true);
+    });
+
+    it('does NOT skip piped commands', () => {
+        expect(isReadOnlyCommand('cat package.json | grep version')).toBe(false);
+    });
+
+    it('does NOT skip non-read commands', () => {
+        expect(isReadOnlyCommand('npm test')).toBe(false);
+        expect(isReadOnlyCommand('python main.py')).toBe(false);
+    });
+
+    it('does NOT skip commands containing read-only names as substrings', () => {
+        expect(isReadOnlyCommand('grep cat file.txt')).toBe(false);
+        expect(isReadOnlyCommand('catalog --list')).toBe(false);
+    });
+
+    it('handles empty command', () => {
+        expect(isReadOnlyCommand('')).toBe(false);
     });
 });
 

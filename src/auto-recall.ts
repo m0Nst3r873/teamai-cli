@@ -33,6 +33,28 @@ const RECALL_TOOLS = new Set(['Bash', 'Grep', 'WebSearch', 'WebFetch']);
 
 // ─── Error detection patterns (Bash only) ──────────────
 
+/** Read-only commands whose output is file content, not execution results. */
+const READ_ONLY_COMMANDS = ['cat', 'head', 'tail', 'less', 'more', 'bat', 'batcat'];
+
+/**
+ * Check if a Bash command is a read-only file viewer.
+ * Output from these commands is file content, not error output,
+ * so it should never trigger error detection.
+ *
+ * Piped commands (e.g. `cat x | grep Error`) are NOT considered
+ * read-only because the downstream command may produce real errors.
+ */
+export function isReadOnlyCommand(command: string): boolean {
+    if (!command) return false;
+
+    // If the command contains a pipe, it's not purely read-only
+    if (command.includes('|')) return false;
+
+    // Extract the base command (first word)
+    const baseCmd = command.trim().split(/\s+/)[0];
+    return READ_ONLY_COMMANDS.includes(baseCmd);
+}
+
 /** Patterns that indicate an error in tool output. */
 const ERROR_PATTERNS: RegExp[] = [
     /\bError\b/,
@@ -80,6 +102,9 @@ const FALSE_POSITIVE_PATTERNS: RegExp[] = [
     /error\.js/i,                          // File names
     /errorHandler/i,                       // Function names
     /\"error\"\s*:/,                       // JSON key definition
+    /\bError\s+Handling\b/i,              // Topic heading "Error Handling"
+    /\bError\s+Recovery\b/i,              // Topic heading "Error Recovery"
+    /\bError\s+Types?\b/i,               // Topic heading "Error Types"
     /catch\s*\(/,                          // catch blocks in code
     /try\s*\{/,                            // try blocks in code
 ];
@@ -448,6 +473,11 @@ export async function autoRecall(): Promise<void> {
     let query = '';
 
     if (toolName === 'Bash') {
+        // Read-only commands output file content, not errors — skip
+        const command = typeof toolInput.command === 'string' ? toolInput.command : '';
+        if (isReadOnlyCommand(command)) {
+            return;
+        }
         // Bash: only recall on errors
         if (!containsError(toolOutput)) {
             return;

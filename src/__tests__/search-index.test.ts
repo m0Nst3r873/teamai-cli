@@ -266,6 +266,31 @@ Docker bridge 网络的常见配置方法。
     expect(results[0].entry.filename).toContain('k8s-oom');
   });
 
+  it('discards results with only body matches (no title/tag hit)', async () => {
+    // "部署" appears in the body of api-timeout doc ("部署 SGLang 推理服务")
+    // but NOT in any title or tag of the test docs.
+    // A body-only match should be filtered out.
+    const index = await loadIndex();
+    const results = search('部署', index!);
+    expect(results).toHaveLength(0);
+  });
+
+  it('returns results when query matches tag but not title', async () => {
+    const index = await loadIndex();
+    // "troubleshooting" is a tag on k8s-oom doc
+    const results = search('troubleshooting', index!);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].entry.filename).toContain('k8s-oom');
+  });
+
+  it('returns results when query matches title even without tag hit', async () => {
+    const index = await loadIndex();
+    // "Docker" is in the title of docker-net doc
+    const results = search('Docker', index!);
+    expect(results.length).toBeGreaterThan(0);
+    expect(results[0].entry.filename).toContain('docker-net');
+  });
+
   it('respects limit parameter', async () => {
     const index = await loadIndex();
     const results = search('docker k8s api', index!, 1);

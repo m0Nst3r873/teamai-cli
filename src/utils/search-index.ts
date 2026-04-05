@@ -299,21 +299,25 @@ export function search(
 
   for (const entry of index.entries) {
     let score = 0;
+    let hasTitleOrTagMatch = false;
     const entryTokens = new Set(entry.tokens);
 
     for (const qt of queryTokens) {
       if (entryTokens.has(`title:${qt}`)) {
         score += 3;
+        hasTitleOrTagMatch = true;
       }
       if (entryTokens.has(`tag:${qt}`)) {
         score += 2;
+        hasTitleOrTagMatch = true;
       }
       if (entryTokens.has(qt)) {
         score += 1;
       }
     }
 
-    if (score > 0) {
+    // Require at least one title or tag match to filter out body-only noise
+    if (score > 0 && hasTitleOrTagMatch) {
       // Vote bonus: +0.5 per vote, max 5 points
       score += Math.min(entry.votes * 0.5, 5);
       results.push({ entry, score });
