@@ -27,6 +27,15 @@ export const BUILTIN_RULE_NAMES = new Set<string>();
 const LEGACY_RULE_NAMES = ['teamai-recall'];
 
 /**
+ * Names that scanLocalForPush and stale-cleanup should skip.
+ * Includes both current built-in rules and legacy rules (being cleaned up).
+ */
+export const EXCLUDED_RULE_NAMES = new Set<string>([
+    ...BUILTIN_RULE_NAMES,
+    ...LEGACY_RULE_NAMES,
+]);
+
+/**
  * Deploy CLI built-in rules to all configured AI tool rules directories.
  *
  * Also cleans up legacy built-in rules that are no longer deployed.

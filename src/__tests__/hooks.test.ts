@@ -62,7 +62,7 @@ describe('hooks', () => {
   });
 
   describe('inject — empty file', () => {
-    it('Claude format: injects 4 events with 10 hooks into empty settings.json', async () => {
+    it('Claude format: injects 4 events with 13 hooks into empty settings.json', async () => {
       await injectHooks('/test/settings.json', 'claude');
 
       const result = mockFiles['/test/settings.json'] as { hooks: Record<string, unknown[]> };
@@ -72,15 +72,15 @@ describe('hooks', () => {
       expect(events).toEqual(['SessionStart', 'Stop', 'PostToolUse', 'UserPromptSubmit']);
 
       // Stop has 3 hooks (update, dashboard-stop, contribute-check)
-      // PostToolUse has 3 hooks (track-skill, dashboard-tool, auto-recall)
+      // PostToolUse has 6 hooks (track-skill, dashboard-tool, 4x auto-recall per tool)
       // Others have 2 each
       expect(result.hooks['SessionStart']).toHaveLength(2);
       expect(result.hooks['Stop']).toHaveLength(3);
-      expect(result.hooks['PostToolUse']).toHaveLength(3);
+      expect(result.hooks['PostToolUse']).toHaveLength(6);
       expect(result.hooks['UserPromptSubmit']).toHaveLength(2);
     });
 
-    it('Cursor format: injects 4 events with 10 hooks into empty hooks.json', async () => {
+    it('Cursor format: injects 4 events with 13 hooks into empty hooks.json', async () => {
       await injectHooks('/test/hooks.json', 'cursor');
 
       const result = mockFiles['/test/hooks.json'] as { version: number; hooks: Record<string, unknown[]> };
@@ -91,10 +91,10 @@ describe('hooks', () => {
       expect(events).toEqual(['sessionStart', 'stop', 'postToolUse', 'beforeSubmitPrompt']);
 
       // stop has 3 hooks (update, dashboard-stop, contribute-check)
-      // postToolUse has 3 hooks (track, dashboard, auto-recall)
+      // postToolUse has 6 hooks (track, dashboard, 4x auto-recall per tool)
       expect(result.hooks['sessionStart']).toHaveLength(2);
       expect(result.hooks['stop']).toHaveLength(3);
-      expect(result.hooks['postToolUse']).toHaveLength(3);
+      expect(result.hooks['postToolUse']).toHaveLength(6);
       expect(result.hooks['beforeSubmitPrompt']).toHaveLength(2);
     });
 
@@ -123,7 +123,7 @@ describe('hooks', () => {
       const result = mockFiles['/test/settings.json'] as { hooks: Record<string, unknown[]> };
       expect(result.hooks['SessionStart']).toHaveLength(2);
       expect(result.hooks['Stop']).toHaveLength(3);
-      expect(result.hooks['PostToolUse']).toHaveLength(3);
+      expect(result.hooks['PostToolUse']).toHaveLength(6);
       expect(result.hooks['UserPromptSubmit']).toHaveLength(2);
     });
 
@@ -134,7 +134,7 @@ describe('hooks', () => {
       const result = mockFiles['/test/hooks.json'] as { hooks: Record<string, unknown[]> };
       expect(result.hooks['sessionStart']).toHaveLength(2);
       expect(result.hooks['stop']).toHaveLength(3);
-      expect(result.hooks['postToolUse']).toHaveLength(3);
+      expect(result.hooks['postToolUse']).toHaveLength(6);
       expect(result.hooks['beforeSubmitPrompt']).toHaveLength(2);
     });
 

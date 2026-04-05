@@ -64,18 +64,21 @@ interface ClaudeSettingsJson {
 //
 //  Hook injection matrix:
 //
-//  Event Type          Matcher   Command                                Description keyword
-//  ──────────────────  ────────  ─────────────────────────────────────  ──────────────────
-//  SessionStart        *         teamai pull                            "Auto-pull"
-//  SessionStart        *         teamai dashboard-report --stdin        "Dashboard report"
-//  Stop                *         teamai update                          "Auto-update"
-//  Stop                *         teamai dashboard-report --stdin        "Dashboard stop"
-//  Stop                *         teamai contribute-check --stdin        "Contribute check"
-//  PostToolUse         Skill     teamai track --stdin                   "Track skill"
-//  PostToolUse         *         teamai dashboard-report --stdin        "Dashboard tool"
-//  PostToolUse         *         teamai auto-recall --stdin             "Auto-recall"
-//  UserPromptSubmit    *         teamai track-slash                     "Track slash"
-//  UserPromptSubmit    *         teamai dashboard-report --stdin        "Dashboard prompt"
+//  Event Type          Matcher      Command                                Description keyword
+//  ──────────────────  ───────────  ─────────────────────────────────────  ──────────────────
+//  SessionStart        *            teamai pull                            "Auto-pull"
+//  SessionStart        *            teamai dashboard-report --stdin        "Dashboard report"
+//  Stop                *            teamai update                          "Auto-update"
+//  Stop                *            teamai dashboard-report --stdin        "Dashboard stop"
+//  Stop                *            teamai contribute-check --stdin        "Contribute check"
+//  PostToolUse         Skill        teamai track --stdin                   "Track skill"
+//  PostToolUse         *            teamai dashboard-report --stdin        "Dashboard tool"
+//  PostToolUse         Bash         teamai auto-recall --stdin             "Auto-recall Bash"
+//  PostToolUse         Grep         teamai auto-recall --stdin             "Auto-recall Grep"
+//  PostToolUse         WebSearch    teamai auto-recall --stdin             "Auto-recall WebSearch"
+//  PostToolUse         WebFetch     teamai auto-recall --stdin             "Auto-recall WebFetch"
+//  UserPromptSubmit    *            teamai track-slash                     "Track slash"
+//  UserPromptSubmit    *            teamai dashboard-report --stdin        "Dashboard prompt"
 //
 
 /** Identifies a teamai hook by its description keyword (substring match). */
@@ -135,15 +138,17 @@ function getClaudeHooks(tool: string): ClaudeHookDef[] {
       },
     },
     // ─── Auto-recall (search knowledge base on search tools + Bash errors) ────────
-    {
-      eventType: 'PostToolUse',
-      descriptionKeyword: 'Auto-recall',
+    // Split into 4 precise matchers to avoid spawning a process for tools that
+    // would immediately exit (auto-recall only handles Bash/Grep/WebSearch/WebFetch).
+    ...(['Bash', 'Grep', 'WebSearch', 'WebFetch'] as const).map((matcher) => ({
+      eventType: 'PostToolUse' as const,
+      descriptionKeyword: `Auto-recall ${matcher}`,
       hook: {
-        matcher: '*',
+        matcher,
         hooks: [{ type: 'command', command: getAutoRecallCommand(tool) }],
-        description: `${TEAMAI_HOOK_DESCRIPTION_PREFIX} Auto-recall on search tools and Bash errors`,
+        description: `${TEAMAI_HOOK_DESCRIPTION_PREFIX} Auto-recall on ${matcher}`,
       },
-    },
+    })),
     // ─── Dashboard hooks (independent from tracking) ────────
     {
       eventType: 'SessionStart',
@@ -212,7 +217,11 @@ function buildCursorHooks(tool: string): Record<string, CursorHookEntry[]> {
     postToolUse: [
       { command: getTrackCommand(tool), timeout: 10, matcher: 'Skill' },
       { command: getDashboardReportCommand(tool), timeout: 10 },
-      { command: getAutoRecallCommand(tool), timeout: 3 },
+      ...(['Bash', 'Grep', 'WebSearch', 'WebFetch'] as const).map((matcher) => ({
+        command: getAutoRecallCommand(tool),
+        timeout: 3,
+        matcher,
+      })),
     ],
     beforeSubmitPrompt: [
       { command: getTrackSlashCommand(tool), timeout: 10 },
@@ -418,8 +427,13 @@ async function injectCursorHooks(hooksPath: string, tool: string): Promise<void>
 
     for (const newEntry of newEntries) {
       const newSubcmd = extractTeamaiSubcommand(newEntry.command);
+      const newMatcher = (newEntry as { matcher?: string }).matcher;
       const existingIdx = hooksJson.hooks[event].findIndex(
-        (h) => extractTeamaiSubcommand(h.command) === newSubcmd,
+        (h) => {
+          const hMatcher = (h as { matcher?: string }).matcher;
+          return extractTeamaiSubcommand(h.command) === newSubcmd
+            && hMatcher === newMatcher;
+        },
       );
       if (existingIdx >= 0) {
         const cur = hooksJson.hooks[event][existingIdx];

@@ -1178,8 +1178,8 @@ describe('hook command strings', () => {
     expect(result.hooks.SessionStart).toHaveLength(2);
     expect(result.hooks.SessionStart.every((h: { description?: string }) => h.description)).toBe(true);
 
-    // Stop has 2 hooks: Auto-update + Dashboard stop
-    expect(result.hooks.Stop).toHaveLength(2);
+    // Stop has 3 hooks: Auto-update + Dashboard stop + Contribute check
+    expect(result.hooks.Stop).toHaveLength(3);
     expect(result.hooks.Stop.every((h: { description?: string }) => h.description)).toBe(true);
 
     // Non-teamai hooks should be preserved
@@ -1250,8 +1250,8 @@ describe('hook command strings', () => {
     const result = JSON.parse(await fs.promises.readFile(settingsPath, 'utf-8'));
 
     // Legacy entries cleaned up, fresh hooks injected under PascalCase "Stop" key
-    // (update + dashboard-report = 2)
-    expect(result.hooks.Stop).toHaveLength(2);
+    // (update + dashboard-report + contribute-check = 3)
+    expect(result.hooks.Stop).toHaveLength(3);
     const updateHook = result.hooks.Stop.find((h: { description?: string }) =>
       h.description?.includes('Auto-update'),
     );
