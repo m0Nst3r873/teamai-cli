@@ -55,7 +55,7 @@
 ## 安装
 
 ```bash
-tnpm install -g @tencent/teamai-cli
+npm install -g @tencent/teamai-cli --registry=http://r.tnpm.oa.com
 
 # 验证
 teamai --version
@@ -153,7 +153,7 @@ teamai init --repo <group>/TeamAi-<team> --scope project
 **用户级团队：**
 
 ```bash
-tnpm install -g @tencent/teamai-cli
+npm install -g @tencent/teamai-cli --registry=http://r.tnpm.oa.com
 teamai init --repo <group>/TeamAi-<team>
 # 完成！AI 工具已自动获得团队资源
 ```
@@ -161,7 +161,7 @@ teamai init --repo <group>/TeamAi-<team>
 **项目级团队：**
 
 ```bash
-tnpm install -g @tencent/teamai-cli
+npm install -g @tencent/teamai-cli --registry=http://r.tnpm.oa.com
 cd /path/to/my-project
 teamai init --repo <group>/TeamAi-<team> --scope project
 ```
