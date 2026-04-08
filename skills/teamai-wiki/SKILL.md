@@ -7,7 +7,9 @@ description: "Persistent, incremental LLM Wiki — accumulate structured knowled
 
 持续积累的多页面 Wiki 知识库。通过增量摄入（ingest）、查询（query）、健康检查（lint）不断积累知识，页面间用 `[[wiki links]]` 互相引用，可直接在 Obsidian 中浏览。
 
-**通用知识库**：不仅支持代码，也支持文档、会议纪要、设计决策、团队信息、流程规范等任何知识源。
+**团队共享知识库**：wiki 存储在 team repo 的 `wiki/` 目录中，通过 `teamai pull/push` 与团队同步。不仅支持代码，也支持文档、会议纪要、设计决策、团队信息、流程规范等任何知识源。
+
+**替代 `/teamai-share-learnings`**：`/wiki ingest --from-session` 是 `/teamai-share-learnings` 的严格超集 — 结构化、增量、可查询。
 
 ## Usage
 
@@ -40,12 +42,12 @@ description: "Persistent, incremental LLM Wiki — accumulate structured knowled
 ## Wiki 目录结构
 
 ```
-wiki/                              <- wiki 根目录（默认 ./wiki/，可配置）
+wiki/                              <- 存储在 team repo 中，通过 teamai pull/push 同步
 ├── _schema.md                     <- wiki 约定和配置（每次操作前读取）
 ├── index.md                       <- 所有页面目录索引（按分类组织，含一行摘要）
 ├── log.md                         <- 追加式操作日志
 ├── overview.md                    <- 全局综合概述页
-├── _metadata.json                 <- 机器可读元数据（页面哈希、链接图、统计）
+├── _metadata.json                 <- 机器可读元数据（本地生成，不推送到 team repo）
 │
 ├── entities/                      <- 实体页（专有名词：具体的模块、服务、产品、项目）
 ├── concepts/                      <- 概念页（通用名词：设计模式、架构原则、技术概念）
@@ -241,7 +243,10 @@ When invoked, first determine the subcommand (init/ingest/query/lint/status/expo
 
 #### Step 1 — Parse arguments
 
-- `WIKI_DIR`: 目标 wiki 目录路径，默认 `./wiki/`
+- `WIKI_DIR`: wiki 目录路径。按以下顺序检测：
+  1. team repo 中的 `wiki/` 目录（如果当前项目已通过 `teamai init` 配置）→ 首选
+  2. `~/.claude-internal/wiki/` 或 `~/.claude/wiki/`（本地 AI 工具 wiki 目录）
+  3. 当前目录的 `./wiki/`（fallback）
 - `SOURCE_DIR`: 可选的 `dir` 参数
 
 如果 `WIKI_DIR` 已经存在且包含 `_metadata.json`，提示用户已经初始化过，询问是否要重新初始化。
@@ -1004,10 +1009,11 @@ Wiki exported to: <path>
 8. **_metadata.json 是真相来源** — 页面列表、文件哈希、链接图都以此为准。
 9. **命名一致性** — 文件名 kebab-case，标题 Title Case 或人类可读中文。
 10. **幂等性** — 重复 ingest 同一源目录应产生相同结果（不会重复创建页面）。
-11. **wiki 路径推断** — 如果当前目录已有 `wiki/` 子目录，自动使用它；否则默认创建 `./wiki/`。
+11. **wiki 路径推断** — 优先使用 team repo 的 wiki/ 目录（通过 `teamai pull` 同步到本地）；其次检查 `~/.claude-internal/wiki/` 或 `~/.claude/wiki/`；最后 fallback 到 `./wiki/`。
 12. **Obsidian 兼容** — 所有 `[[links]]` 使用 Obsidian 格式，方便用户在 Obsidian 中直接浏览。
 13. **语言** — Wiki 页面内容默认使用中文撰写，技术术语保持英文原文。
 14. **智能分类** — LLM 根据内容自动判断页面归属哪个分类目录，无需用户指定。
 15. **敏感文件排除** — ingest 时自动跳过 `.env`、`*.pem`、`*.key`、`credentials.json` 等可能含密钥的文件。
 16. **容错处理** — `_metadata.json` 损坏时尝试从 wiki 目录重建；URL 无法访问时给出清晰错误提示。
 17. **源类型自适应** — 代码目录和文档目录使用不同的分析策略，混合目录自动分组处理。
+18. **团队同步** — wiki 页面通过 `teamai push/pull` 与团队共享。`_metadata.json` 不推送，每次 pull 后由本地重建。修改 wiki 后提醒用户运行 `teamai push` 同步到团队。
