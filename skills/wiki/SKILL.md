@@ -7,8 +7,6 @@ description: "Persistent, incremental LLM Wiki — accumulate structured knowled
 
 持续积累的多页面 Wiki 知识库。通过增量摄入（ingest）、查询（query）、健康检查（lint）不断积累知识，页面间用 `[[wiki links]]` 互相引用，可直接在 Obsidian 中浏览。
 
-与 `/summarize` 的区别：`/summarize` 是一次性快照（单文件，快速）；`/wiki` 是持续积累的知识库（多文件，增量，长期维护）。
-
 **通用知识库**：不仅支持代码，也支持文档、会议纪要、设计决策、团队信息、流程规范等任何知识源。
 
 ## Usage
