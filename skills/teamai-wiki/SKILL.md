@@ -1,5 +1,5 @@
 ---
-name: wiki
+name: teamai-wiki
 description: "Persistent, incremental LLM Wiki — accumulate structured knowledge across multiple ingest/query sessions. Supports init, ingest (local files, URLs, sessions), query, lint, export, and status operations with [[wiki links]] cross-references."
 ---
 
