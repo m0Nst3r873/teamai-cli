@@ -65,7 +65,7 @@ async function promptForRoleProfile(repoPath: string): Promise<Pick<LocalConfig,
     log.info('Additional roles (optional):');
     additionalCandidates.forEach((role, index) => {
       const suffix = role.description ? `: ${role.description}` : '';
-      log.info(`  ${index + 1}. ${role.id} - ${role.name}${suffix}`);
+      log.info(`  ${index + 1}. ${role.id}${suffix}`);
     });
 
     const additionalAnswer = await askQuestion('Additional roles (comma-separated numbers, blank to skip): ');

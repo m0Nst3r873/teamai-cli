@@ -108,6 +108,46 @@ program
     await doctor(globalOpts);
   });
 
+// ─── Roles subcommand ─────────────────────────────────────
+
+const rolesCmd = program
+  .command('roles')
+  .description('Manage team roles and resource namespaces')
+  .action(async () => {
+    // Default action: list roles
+    const globalOpts = program.opts() as GlobalOptions;
+    const { rolesList } = await import('./roles-cmd.js');
+    await rolesList(globalOpts);
+  });
+
+rolesCmd
+  .command('init')
+  .description('Create a roles manifest for the team repo (admin)')
+  .action(async () => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { rolesInit } = await import('./roles-cmd.js');
+    await rolesInit(globalOpts);
+  });
+
+rolesCmd
+  .command('list')
+  .description('List all defined roles and your current role')
+  .action(async () => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { rolesList } = await import('./roles-cmd.js');
+    await rolesList(globalOpts);
+  });
+
+rolesCmd
+  .command('set <primary>')
+  .description('Set your primary role (updates local config)')
+  .option('--add <roles...>', 'Additional roles to include')
+  .action(async (primary: string, cmdOpts) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { rolesSet } = await import('./roles-cmd.js');
+    await rolesSet(primary, { ...globalOpts, ...cmdOpts });
+  });
+
 // ─── Tags subcommand ──────────────────────────────────────
 
 const tagsCmd = program

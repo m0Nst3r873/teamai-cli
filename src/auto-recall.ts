@@ -456,6 +456,11 @@ export async function readStdin(): Promise<HookInput | null> {
  * Claude Code reads additionalContext and passes it to AI as context.
  */
 export async function autoRecall(): Promise<void> {
+    // ─── Eval harness: disable flag ────────────────────
+    if (process.env.TEAMAI_RECALL_DISABLED === '1') {
+        return;
+    }
+
     const input = await readStdin();
     if (!input) {
         log.debug('auto-recall: no STDIN data');
@@ -519,7 +524,33 @@ export async function autoRecall(): Promise<void> {
     }
 
     // Search
+    const searchStart = Date.now();
     const results = search(query, index, 3);
+
+    // ─── Eval harness: write structured log ────────────
+    // Intentionally placed BEFORE the "no results" early return so that
+    // zero-result searches are also logged — useful for eval gap analysis.
+    const evalLogPath = process.env.TEAMAI_EVAL_LOG_PATH;
+    if (evalLogPath) {
+        const searchMs = Date.now() - searchStart;
+        const evalEntry = JSON.stringify({
+            query,
+            results: results.map((r) => ({
+                filename: r.entry.filename,
+                title: r.entry.title,
+                score: r.score,
+                tags: r.entry.tags,
+            })),
+            searchMs,
+            strategy: process.env.TEAMAI_SEARCH_STRATEGY ?? 'keyword-v1',
+        });
+        try {
+            fs.appendFileSync(evalLogPath, evalEntry + '\n');
+        } catch {
+            // Silent: eval log failure should never affect hook output
+        }
+    }
+
     if (results.length === 0) {
         log.debug(`auto-recall: no results for query: ${query.slice(0, 50)}`);
         return;

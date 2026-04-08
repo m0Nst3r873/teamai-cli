@@ -22,7 +22,6 @@ describe('loadRolesManifest', () => {
 version: 1
 roles:
   - id: hai
-    name: HAI R&D
     description: HyperAI research and development resources
     resources:
       knowledge: [common, hai]
@@ -38,7 +37,6 @@ defaults:
       roles: [
         {
           id: 'hai',
-          name: 'HAI R&D',
           resources: {
             knowledge: ['common', 'hai'],
             skills: ['common', 'hai'],
@@ -56,7 +54,6 @@ defaults:
 version: 1
 roles:
   - id: hai
-    name: HAI R&D
 defaults:
   shareTarget: primary-role
 `);
@@ -70,7 +67,6 @@ defaults:
 version: 1
 roles:
   - id: hai
-    name: HAI R&D
     resources:
       knowledge: [common, hai]
       skills: [common, hai]
@@ -89,13 +85,11 @@ defaults:
 version: 1
 roles:
   - id: hai
-    name: HAI R&D
     resources:
       knowledge: [common, hai]
       skills: [common, hai]
       learnings: [common, hai]
   - id: hai
-    name: Duplicate HAI
     resources:
       knowledge: [common, hai]
       skills: [common, hai]
@@ -115,7 +109,6 @@ describe('resolveRoleResourceNamespaces', () => {
     roles: [
       {
         id: 'hai',
-        name: 'HAI R&D',
         description: 'hai',
         resources: {
           knowledge: ['common', 'hai'],
@@ -125,7 +118,6 @@ describe('resolveRoleResourceNamespaces', () => {
       },
       {
         id: 'pm',
-        name: 'PM',
         description: 'pm',
         resources: {
           knowledge: ['common', 'pm'],
@@ -135,7 +127,6 @@ describe('resolveRoleResourceNamespaces', () => {
       },
       {
         id: 'thpc',
-        name: 'THPC',
         description: 'thpc',
         resources: {
           knowledge: ['common', 'thpc'],
@@ -181,11 +172,11 @@ describe('resolveRoleResourceNamespaces', () => {
 describe('describeRoles', () => {
   it('formats role labels for prompts and errors', () => {
     expect(describeRoles([
-      { id: 'hai', name: 'HAI R&D', description: 'HyperAI research' },
-      { id: 'pm', name: 'Product Manager', description: '' },
+      { id: 'hai', description: 'HyperAI research' },
+      { id: 'pm', description: '' },
     ])).toEqual([
-      'hai - HAI R&D: HyperAI research',
-      'pm - Product Manager',
+      'hai: HyperAI research',
+      'pm',
     ]);
   });
 });

@@ -15,7 +15,6 @@ const RoleResourceNamespacesSchema = z.object({
 
 const RoleSchema = z.object({
   id: z.string().min(1),
-  name: z.string().min(1),
   description: z.string().default(''),
   resources: RoleResourceNamespacesSchema,
 });
@@ -93,10 +92,10 @@ export function listRoleIds(manifest: RolesManifest): string[] {
   return manifest.roles.map((role) => role.id);
 }
 
-export function describeRoles(roles: Array<Pick<TeamRole, 'id' | 'name' | 'description'>>): string[] {
+export function describeRoles(roles: Array<Pick<TeamRole, 'id' | 'description'>>): string[] {
   return roles.map((role) => role.description
-    ? `${role.id} - ${role.name}: ${role.description}`
-    : `${role.id} - ${role.name}`);
+    ? `${role.id}: ${role.description}`
+    : `${role.id}`);
 }
 
 function getRoleOrThrow(manifest: RolesManifest, roleId: string): TeamRole {

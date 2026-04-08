@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -369,8 +369,36 @@ describe('shouldSkipQuery', () => {
     });
 });
 
-// ─── CLI integration: STDIN parsing + JSON output ──────────
+// ─── autoRecall: TEAMAI_RECALL_DISABLED flag ───────────────
 
+describe('autoRecall TEAMAI_RECALL_DISABLED', () => {
+    const originalEnv = process.env.TEAMAI_RECALL_DISABLED;
+
+    beforeEach(() => {
+        vi.spyOn(process.stdout, 'write').mockReturnValue(true);
+    });
+
+    afterEach(() => {
+        if (originalEnv === undefined) {
+            delete process.env.TEAMAI_RECALL_DISABLED;
+        } else {
+            process.env.TEAMAI_RECALL_DISABLED = originalEnv;
+        }
+        vi.restoreAllMocks();
+    });
+
+    it('returns immediately without writing to stdout when TEAMAI_RECALL_DISABLED=1', async () => {
+        process.env.TEAMAI_RECALL_DISABLED = '1';
+
+        // Dynamically import to get the real autoRecall function
+        const { autoRecall } = await import('../auto-recall.js');
+        await autoRecall();
+
+        expect(process.stdout.write).not.toHaveBeenCalled();
+    });
+});
+
+// ─── CLI integration: STDIN parsing + JSON output ──────────
 describe('auto-recall CLI integration', () => {
     const CLI_PATH = path.resolve(__dirname, '../../dist/index.js');
 
