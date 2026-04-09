@@ -2,32 +2,37 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
-## [0.13.0](https://git.woa.com/teamai/teamai-cli/compare/v0.12.0...v0.13.0) (2026-04-09)
+## [0.13.1](https://git.woa.com/teamai/teamai-cli/compare/v0.11.2...v0.13.1) (2026-04-09)
 
 ### ✨ 新功能
 
-- **Wiki 知识库**：新增 `/wiki` skill，支持持久化、增量式团队知识 Wiki，跨会话积累结构化知识（`teamai-wiki`）
-- **Wiki Team Repo 集成**：WikiResourceHandler 支持将 wiki 内容同步到团队仓库，新增 comparisons/ 分类（Karpathy 第 4 类型）
-- **Roles 管理**：新增 `teamai roles` 命令，支持团队角色管理（创建、列举、切换）
-- **Role-aware Skill 同步**：`teamai pull/push` 支持按角色过滤 skill，不同角色看到不同的技能集
-- **Local Pushignore**：skill 目录支持 `.pushignore` 文件，push 时自动排除不需要同步的本地文件
+- **Roles 管理**：新增 `teamai roles` 命令组（`init`/`list`/`set`），支持团队角色的创建、列举和切换 (!113)
+- **Role-aware Skill 同步**：`teamai pull/push` 支持按角色过滤 skill，不同角色看到不同的技能集 (!100)
+- **Local Pushignore**：skill 目录支持 `.pushignore` 文件，push 时自动排除不需要同步的本地文件 (!114)
+- **Marketplace 自动刷新**：skill push/remove 后自动刷新 `.codebuddy-plugin/marketplace.json`，兼容 CodeBuddy 插件市场 (!119)
 
 ### 🐛 修复
 
-- 修复 roles manifest 缺失时 role 选择报错的问题
-- 修复 auto-recall 对自身输出产生递归误报的问题
-- 修复 Stop hook 使用错误的 output schema（`hookSpecificOutput` → `stopReason`）
+- 修复 roles manifest 缺失时 `teamai init` role 选择报错的问题 (!112)
+- 修复 auto-recall 对自身输出产生递归误报的问题 (!111)
+- 修复 auto-recall 搜索精度不足，新增 title/tag 匹配要求，跳过只读命令 (!104)
+- 修复 Stop hook 使用错误的 output schema（`hookSpecificOutput` → `stopReason`）(!107, !108)
 
 ### ⚡ 性能优化
 
-- **Team Repo 同步加速**：当 team repo HEAD 未变化时跳过资源同步，避免无意义的文件扫描
-- **Auto-recall 精准匹配**：matcher 从通配符 `*` 收窄为 4 个精确工具，减少不必要的触发
+- **Team Repo 同步加速**：当 team repo HEAD 未变化时跳过资源同步，避免无意义的文件扫描 (!110)
+- **Auto-recall 精准匹配**：matcher 从通配符 `*` 收窄为 4 个精确工具，减少不必要的触发 (!106)
 
 ### ♻️ 重构
 
-- `role bucket` 重命名为 `namespace`，语义更清晰
-- `contribute-check` 从 PostToolUse hook 迁移到 Stop hook，减少每次工具调用的开销
-- `share-learnings` 标记为 deprecated，推荐使用 `/wiki ingest --from-session`
+- 统一 recall 机制 — hook 搜索工具，删除 session-recall 和 recall rule (!102)
+- `contribute-check` 从 PostToolUse hook 迁移到 Stop hook，减少每次工具调用的开销 (!103)
+- `role bucket` 重命名为 `namespace`，语义更清晰 (!105)
+
+### 📝 文档
+
+- 添加 CLAUDE.md 项目说明和发布流程 (!97)
+- 文档中 tnpm 替换为标准 npm + --registry (!118)
 
 ---
 
