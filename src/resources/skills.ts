@@ -5,6 +5,7 @@ import { resolveBaseDir, getPushignorePath } from '../types.js';
 import { listDirs, pathExists, copyDir, remove, dirContentEqual, getDirLatestMtime, readFileSafe, writeFile } from '../utils/fs.js';
 import { log } from '../utils/logger.js';
 import { BUILTIN_SKILL_NAMES } from '../builtin-skills.js';
+import { loadRolesManifest, resolveRoleResourceNamespaces } from '../roles.js';
 
 /** File name used to track who has contributed (pushed) a skill. */
 const CONTRIBUTORS_FILE = 'CONTRIBUTORS';
@@ -18,12 +19,26 @@ async function readPushIgnoredSkills(): Promise<Set<string>> {
   );
 }
 
-function resolveSkillNamespaces(localConfig: LocalConfig): string[] {
+/**
+ * Resolve skill namespaces from the manifest using the user's configured roles.
+ * Falls back to [primaryRole, ...additionalRoles] if manifest is unavailable,
+ * and returns [] if no roles are configured.
+ */
+async function resolveSkillNamespaces(localConfig: LocalConfig): Promise<string[]> {
+  if (!localConfig.primaryRole) return [];
 
-  if (localConfig.primaryRole) {
+  try {
+    const manifest = await loadRolesManifest(localConfig.repo.localPath);
+    const namespaces = resolveRoleResourceNamespaces({
+      manifest,
+      primaryRole: localConfig.primaryRole,
+      additionalRoles: localConfig.additionalRoles ?? [],
+    });
+    return namespaces.skills;
+  } catch {
+    // Fallback: use role ids as namespace names (legacy behavior)
     return [localConfig.primaryRole, ...(localConfig.additionalRoles ?? [])];
   }
-  return [];
 }
 
 function getSkillDestination(localConfig: LocalConfig, skillName: string, namespace?: string): string {
@@ -42,7 +57,7 @@ export class SkillsHandler extends ResourceHandler {
    * the one with the latest mtime when multiple dirs have modifications.
    */
   async scanLocalForPush(teamConfig: TeamaiConfig, localConfig: LocalConfig): Promise<ResourceItem[]> {
-    const scopedNamespaces = resolveSkillNamespaces(localConfig);
+    const scopedNamespaces = await resolveSkillNamespaces(localConfig);
     const teamSkills = new Map<string, { dir: string; namespace?: string }>();
 
     if (scopedNamespaces.length > 0) {
@@ -224,7 +239,7 @@ export class SkillsHandler extends ResourceHandler {
     const baseDir = resolveBaseDir(localConfig);
 
     // Remove from team repo
-    const scopedNamespaces = resolveSkillNamespaces(localConfig);
+    const scopedNamespaces = await resolveSkillNamespaces(localConfig);
     if (scopedNamespaces.length > 0) {
       for (const namespace of scopedNamespaces) {
         const namespaceDir = path.join(localConfig.repo.localPath, 'skills', namespace, name);

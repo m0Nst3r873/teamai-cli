@@ -1,7 +1,7 @@
 import path from 'node:path';
 import YAML from 'yaml';
 import { z } from 'zod';
-import { readFileSafe } from './utils/fs.js';
+import { readFileSafe, ensureDir, writeFile } from './utils/fs.js';
 
 const ROLE_RESOURCE_TYPES = ['knowledge', 'skills', 'learnings'] as const;
 
@@ -86,6 +86,23 @@ export async function loadRolesManifest(repoPath: string): Promise<RolesManifest
   }
 
   return validateManifestShape(raw);
+}
+
+export async function saveRolesManifest(repoPath: string, manifest: RolesManifest): Promise<void> {
+  // Re-validate before writing to prevent persisting invalid manifests
+  validateManifestShape(manifest);
+
+  const manifestDir = path.join(repoPath, 'manifest');
+  const manifestPath = path.join(manifestDir, 'roles.yaml');
+  await ensureDir(manifestDir);
+  await writeFile(manifestPath, YAML.stringify(manifest));
+}
+
+/**
+ * Find a role by id without throwing. Returns undefined if not found.
+ */
+export function findRole(manifest: RolesManifest, roleId: string): TeamRole | undefined {
+  return manifest.roles.find((candidate) => candidate.id === roleId);
 }
 
 export function listRoleIds(manifest: RolesManifest): string[] {

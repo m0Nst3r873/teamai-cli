@@ -20,12 +20,26 @@ interface RolePullContext {
 async function buildRolePullContext(localConfig: LocalConfig): Promise<RolePullContext | null> {
   if (!localConfig.primaryRole) return null;
 
-  const manifest = await loadRolesManifest(localConfig.repo.localPath);
-  const activeNamespaces = resolveRoleResourceNamespaces({
-    manifest,
-    primaryRole: localConfig.primaryRole,
-    additionalRoles: localConfig.additionalRoles ?? [],
-  });
+  let manifest;
+  try {
+    manifest = await loadRolesManifest(localConfig.repo.localPath);
+  } catch {
+    log.warn('Could not load roles manifest. Skipping role-based filtering.');
+    return null;
+  }
+
+  let activeNamespaces;
+  try {
+    activeNamespaces = resolveRoleResourceNamespaces({
+      manifest,
+      primaryRole: localConfig.primaryRole,
+      additionalRoles: localConfig.additionalRoles ?? [],
+    });
+  } catch (e) {
+    log.warn(`Role "${localConfig.primaryRole}" not found in manifest. Falling back to unfiltered sync.`);
+    log.warn('Run `teamai roles set <role>` to pick a valid role.');
+    return null;
+  }
 
   const allSkillNamespaces = new Set(
     manifest.roles.flatMap((role) => role.resources.skills),

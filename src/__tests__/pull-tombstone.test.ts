@@ -260,14 +260,14 @@ describe('pull role-aware sync and cleanup', () => {
     expect(await fse.pathExists(path.join(homeDir, '.claude/skills', 'pm-skill'))).toBe(false);
   });
 
-  it('aborts pull when the roles manifest is malformed', async () => {
+  it('gracefully degrades when the roles manifest is malformed', async () => {
     const { loadRolesManifest } = await import('../roles.js');
     vi.mocked(loadRolesManifest).mockRejectedValueOnce(new Error('Invalid roles manifest'));
 
     await pull({});
 
     const { log } = await import('../utils/logger.js');
-    expect(log.error).toHaveBeenCalledWith(expect.stringContaining('Invalid roles manifest'));
+    expect(log.warn).toHaveBeenCalledWith(expect.stringContaining('Could not load roles manifest'));
   });
 
   it('aborts pull when the same skill exists in multiple active namespaces', async () => {

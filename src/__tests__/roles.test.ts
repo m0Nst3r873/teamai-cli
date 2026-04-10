@@ -1,12 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from 'node:fs';
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, readFileSync, existsSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
+import YAML from 'yaml';
 import {
   describeRoles,
+  findRole,
   loadRolesManifest,
+  saveRolesManifest,
   resolveRoleResourceNamespaces,
 } from '../roles.js';
+import type { RolesManifest } from '../roles.js';
 
 describe('loadRolesManifest', () => {
   function writeManifest(content: string): string {
@@ -178,5 +182,90 @@ describe('describeRoles', () => {
       'hai: HyperAI research',
       'pm',
     ]);
+  });
+});
+
+// ─── New tests for saveRolesManifest and findRole ─────────
+
+function makeManifest(roles: Array<{ id: string; namespaces: string[] }>): RolesManifest {
+  return {
+    version: 1,
+    roles: roles.map((r) => ({
+      id: r.id,
+      description: '',
+      resources: {
+        knowledge: r.namespaces,
+        skills: r.namespaces,
+        learnings: r.namespaces,
+      },
+    })),
+    defaults: { shareTarget: 'primary-role' },
+  };
+}
+
+describe('saveRolesManifest', () => {
+  it('writes a valid manifest and can be loaded back', async () => {
+    const repoDir = mkdtempSync(path.join(os.tmpdir(), 'teamai-roles-save-'));
+    const manifest = makeManifest([{ id: 'hai', namespaces: ['common', 'hai'] }]);
+
+    await saveRolesManifest(repoDir, manifest);
+
+    const loaded = await loadRolesManifest(repoDir);
+    expect(loaded.roles[0].id).toBe('hai');
+    expect(loaded.roles[0].resources.skills).toEqual(['common', 'hai']);
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it('creates the manifest directory if it does not exist', async () => {
+    const repoDir = mkdtempSync(path.join(os.tmpdir(), 'teamai-roles-save-'));
+    const manifestPath = path.join(repoDir, 'manifest', 'roles.yaml');
+    expect(existsSync(manifestPath)).toBe(false);
+
+    const manifest = makeManifest([{ id: 'test', namespaces: ['common'] }]);
+    await saveRolesManifest(repoDir, manifest);
+
+    expect(existsSync(manifestPath)).toBe(true);
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it('rejects an invalid manifest (empty roles array)', async () => {
+    const repoDir = mkdtempSync(path.join(os.tmpdir(), 'teamai-roles-save-'));
+    const badManifest = { version: 1, roles: [], defaults: { shareTarget: 'primary-role' as const } };
+
+    await expect(saveRolesManifest(repoDir, badManifest as RolesManifest)).rejects.toThrow();
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it('rejects a manifest with duplicate role ids', async () => {
+    const repoDir = mkdtempSync(path.join(os.tmpdir(), 'teamai-roles-save-'));
+    const manifest = makeManifest([
+      { id: 'hai', namespaces: ['common'] },
+      { id: 'hai', namespaces: ['common'] },
+    ]);
+
+    await expect(saveRolesManifest(repoDir, manifest)).rejects.toThrow(/duplicate role id/i);
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+});
+
+describe('findRole', () => {
+  const manifest = makeManifest([
+    { id: 'hai', namespaces: ['common', 'hai'] },
+    { id: 'pm', namespaces: ['common', 'pm'] },
+  ]);
+
+  it('returns the role when it exists', () => {
+    const role = findRole(manifest, 'hai');
+    expect(role).toBeDefined();
+    expect(role!.id).toBe('hai');
+  });
+
+  it('returns undefined when role does not exist', () => {
+    const role = findRole(manifest, 'nonexistent');
+    expect(role).toBeUndefined();
   });
 });

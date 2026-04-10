@@ -148,6 +148,38 @@ rolesCmd
     await rolesSet(primary, { ...globalOpts, ...cmdOpts });
   });
 
+rolesCmd
+  .command('add <id>')
+  .description('Add a new role to the manifest (admin)')
+  .requiredOption('--namespaces <ns>', 'Comma-separated resource namespaces (e.g. common,hai)')
+  .option('-d, --description <desc>', 'Description for the role')
+  .action(async (id: string, cmdOpts) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { rolesAdd } = await import('./roles-cmd.js');
+    await rolesAdd(id, { ...globalOpts, ...cmdOpts });
+  });
+
+rolesCmd
+  .command('remove <id>')
+  .description('Remove a role from the manifest (admin)')
+  .action(async (id: string) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { rolesRemove } = await import('./roles-cmd.js');
+    await rolesRemove(id, globalOpts);
+  });
+
+rolesCmd
+  .command('update <id>')
+  .description('Update a role in the manifest (admin)')
+  .option('--add-namespaces <ns>', 'Comma-separated namespaces to add')
+  .option('--remove-namespaces <ns>', 'Comma-separated namespaces to remove')
+  .option('-d, --description <desc>', 'New description for the role')
+  .action(async (id: string, cmdOpts) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { rolesUpdate } = await import('./roles-cmd.js');
+    await rolesUpdate(id, { ...globalOpts, ...cmdOpts });
+  });
+
 // ─── Tags subcommand ──────────────────────────────────────
 
 const tagsCmd = program

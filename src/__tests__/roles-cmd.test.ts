@@ -10,10 +10,13 @@ import YAML from 'yaml';
 
 import {
   loadRolesManifest,
+  saveRolesManifest,
+  findRole,
   listRoleIds,
   describeRoles,
   resolveRoleResourceNamespaces,
 } from '../roles.js';
+import type { RolesManifest, TeamRole } from '../roles.js';
 
 function createTempRepo(options?: { withManifest?: boolean; roles?: Array<{ id: string; namespaces: string[] }> }): string {
   const repoDir = mkdtempSync(path.join(os.tmpdir(), 'teamai-roles-cmd-'));
@@ -239,5 +242,232 @@ describe('init.ts — missing manifest graceful skip', () => {
     }
 
     rmSync(repoDir, { recursive: true, force: true });
+  });
+});
+
+// ─── roles add — manifest manipulation logic ────────────
+
+describe('roles add — manifest manipulation', () => {
+  it('adds a new role to existing manifest', async () => {
+    const repoDir = createTempRepo({ withManifest: true });
+    const manifest = await loadRolesManifest(repoDir);
+
+    const newRole: TeamRole = {
+      id: 'devops',
+      description: 'Infrastructure team',
+      resources: {
+        knowledge: ['common', 'infra'],
+        skills: ['common', 'infra'],
+        learnings: ['common', 'infra'],
+      },
+    };
+
+    const updated: RolesManifest = {
+      ...manifest,
+      roles: [...manifest.roles, newRole],
+    };
+
+    await saveRolesManifest(repoDir, updated);
+    const reloaded = await loadRolesManifest(repoDir);
+
+    expect(reloaded.roles).toHaveLength(3);
+    expect(reloaded.roles[2].id).toBe('devops');
+    expect(reloaded.roles[2].description).toBe('Infrastructure team');
+    expect(reloaded.roles[2].resources.skills).toEqual(['common', 'infra']);
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it('rejects adding a role with duplicate id', async () => {
+    const repoDir = createTempRepo({ withManifest: true });
+    const manifest = await loadRolesManifest(repoDir);
+
+    expect(findRole(manifest, 'hai')).toBeDefined();
+
+    // Attempting to save with duplicate id should fail validation
+    const duplicate: TeamRole = {
+      id: 'hai',
+      description: 'duplicate',
+      resources: { knowledge: ['x'], skills: ['x'], learnings: ['x'] },
+    };
+    const bad: RolesManifest = { ...manifest, roles: [...manifest.roles, duplicate] };
+
+    await expect(saveRolesManifest(repoDir, bad)).rejects.toThrow(/duplicate role id/i);
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it('findRole returns undefined for non-existent id', async () => {
+    const repoDir = createTempRepo({ withManifest: true });
+    const manifest = await loadRolesManifest(repoDir);
+
+    expect(findRole(manifest, 'nonexistent')).toBeUndefined();
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+});
+
+// ─── roles remove — manifest manipulation logic ─────────
+
+describe('roles remove — manifest manipulation', () => {
+  it('removes an existing role from manifest', async () => {
+    const repoDir = createTempRepo({ withManifest: true });
+    const manifest = await loadRolesManifest(repoDir);
+
+    expect(listRoleIds(manifest)).toContain('hai');
+
+    const updated: RolesManifest = {
+      ...manifest,
+      roles: manifest.roles.filter((r) => r.id !== 'hai'),
+    };
+
+    await saveRolesManifest(repoDir, updated);
+    const reloaded = await loadRolesManifest(repoDir);
+
+    expect(listRoleIds(reloaded)).not.toContain('hai');
+    expect(reloaded.roles).toHaveLength(1);
+    expect(reloaded.roles[0].id).toBe('pm');
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it('rejects removing the last role (empty roles array)', async () => {
+    const repoDir = createTempRepo({
+      withManifest: true,
+      roles: [{ id: 'only', namespaces: ['common'] }],
+    });
+    const manifest = await loadRolesManifest(repoDir);
+
+    const empty: RolesManifest = { ...manifest, roles: [] };
+
+    await expect(saveRolesManifest(repoDir, empty as RolesManifest)).rejects.toThrow();
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it('findRole returns undefined for removed role', async () => {
+    const repoDir = createTempRepo({ withManifest: true });
+    const manifest = await loadRolesManifest(repoDir);
+
+    const updated: RolesManifest = {
+      ...manifest,
+      roles: manifest.roles.filter((r) => r.id !== 'hai'),
+    };
+
+    expect(findRole(updated, 'hai')).toBeUndefined();
+    expect(findRole(updated, 'pm')).toBeDefined();
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+});
+
+// ─── roles update — manifest manipulation logic ─────────
+
+describe('roles update — manifest manipulation', () => {
+  it('adds namespaces to an existing role', async () => {
+    const repoDir = createTempRepo({ withManifest: true });
+    const manifest = await loadRolesManifest(repoDir);
+
+    const role = findRole(manifest, 'hai')!;
+    const existingNs = new Set(role.resources.skills);
+    existingNs.add('infra');
+    const updatedNs = [...existingNs];
+
+    const updatedRole: TeamRole = {
+      ...role,
+      resources: { knowledge: updatedNs, skills: updatedNs, learnings: updatedNs },
+    };
+
+    const updated: RolesManifest = {
+      ...manifest,
+      roles: manifest.roles.map((r) => (r.id === 'hai' ? updatedRole : r)),
+    };
+
+    await saveRolesManifest(repoDir, updated);
+    const reloaded = await loadRolesManifest(repoDir);
+
+    expect(findRole(reloaded, 'hai')!.resources.skills).toEqual(['common', 'hai', 'infra']);
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it('removes namespaces from an existing role', async () => {
+    const repoDir = createTempRepo({
+      withManifest: true,
+      roles: [{ id: 'hai', namespaces: ['common', 'hai', 'extra'] }],
+    });
+    const manifest = await loadRolesManifest(repoDir);
+
+    const role = findRole(manifest, 'hai')!;
+    const toRemove = new Set(['extra']);
+    const remaining = role.resources.skills.filter((ns) => !toRemove.has(ns));
+
+    const updatedRole: TeamRole = {
+      ...role,
+      resources: { knowledge: remaining, skills: remaining, learnings: remaining },
+    };
+
+    const updated: RolesManifest = {
+      ...manifest,
+      roles: manifest.roles.map((r) => (r.id === 'hai' ? updatedRole : r)),
+    };
+
+    await saveRolesManifest(repoDir, updated);
+    const reloaded = await loadRolesManifest(repoDir);
+
+    expect(findRole(reloaded, 'hai')!.resources.skills).toEqual(['common', 'hai']);
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it('updates description of an existing role', async () => {
+    const repoDir = createTempRepo({ withManifest: true });
+    const manifest = await loadRolesManifest(repoDir);
+
+    const role = findRole(manifest, 'hai')!;
+    const updatedRole: TeamRole = { ...role, description: 'HyperAI research team' };
+
+    const updated: RolesManifest = {
+      ...manifest,
+      roles: manifest.roles.map((r) => (r.id === 'hai' ? updatedRole : r)),
+    };
+
+    await saveRolesManifest(repoDir, updated);
+    const reloaded = await loadRolesManifest(repoDir);
+
+    expect(findRole(reloaded, 'hai')!.description).toBe('HyperAI research team');
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it('allows empty namespaces at schema level (command layer guards this)', async () => {
+    const repoDir = createTempRepo({ withManifest: true });
+    const manifest = await loadRolesManifest(repoDir);
+
+    const role = findRole(manifest, 'hai')!;
+    const updatedRole: TeamRole = {
+      ...role,
+      resources: { knowledge: [], skills: [], learnings: [] },
+    };
+
+    const updated: RolesManifest = {
+      ...manifest,
+      roles: manifest.roles.map((r) => (r.id === 'hai' ? updatedRole : r)),
+    };
+
+    // Schema allows empty arrays; the command layer (rolesUpdate) guards against this
+    await saveRolesManifest(repoDir, updated);
+    const reloaded = await loadRolesManifest(repoDir);
+    expect(findRole(reloaded, 'hai')!.resources.skills).toEqual([]);
+
+    rmSync(repoDir, { recursive: true, force: true });
+  });
+
+  it('deduplicates when adding namespaces that already exist', () => {
+    const existing = ['common', 'hai'];
+    const toAdd = ['hai', 'infra'];
+    const ns = new Set(existing);
+    for (const a of toAdd) ns.add(a);
+    expect([...ns]).toEqual(['common', 'hai', 'infra']);
   });
 });
