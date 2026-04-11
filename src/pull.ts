@@ -5,6 +5,7 @@ import { pullRepo, getHeadRev } from './utils/git.js';
 import { log, spinner } from './utils/logger.js';
 import { pathExists, remove, listFiles, listDirs } from './utils/fs.js';
 import { getHandler, RulesHandler, DocsHandler, EnvHandler } from './resources/index.js';
+import { ResourceHandler } from './resources/base.js';
 import { loadTagsConfig, filterByTags } from './utils/tags.js';
 import { BUILTIN_SKILL_NAMES } from './builtin-skills.js';
 import type { GlobalOptions, ResourceType, ResourceItem, TeamaiConfig, LocalConfig, TagsConfig } from './types.js';
@@ -102,6 +103,7 @@ export async function cleanupInactiveNamespaceSkills(
 
   for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
     if (!toolPath.skills) continue;
+    if (!await ResourceHandler.isToolInstalled(toolPath.skills, baseDir)) continue;
     if (!await pathExists(path.join(baseDir, toolPath.skills))) continue;
 
     const localSkillNames = await listDirs(path.join(baseDir, toolPath.skills));
@@ -377,6 +379,7 @@ async function pullForScope(
       for (const [_tool, toolPath] of Object.entries(freshConfig.toolPaths)) {
         const dir = type === 'rules' ? toolPath.rules : toolPath.skills;
         if (!dir) continue;
+        if (!await ResourceHandler.isToolInstalled(dir, baseDir)) continue;
 
         for (const name of tombstones) {
           const localPath = path.join(baseDir, dir, ext ? `${name}${ext}` : name);
@@ -404,6 +407,7 @@ async function pullForScope(
 
     for (const [tool, toolPath] of Object.entries(freshConfig.toolPaths)) {
       if (!toolPath.skills) continue;
+      if (!await ResourceHandler.isToolInstalled(toolPath.skills, baseDir)) continue;
       const skillsDir = path.join(baseDir, toolPath.skills);
       if (!await pathExists(skillsDir)) continue;
 

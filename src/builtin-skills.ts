@@ -4,6 +4,7 @@ import { ensureDir, pathExists } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import type { TeamaiConfig, LocalConfig } from './types.js';
 import { resolveBaseDir } from './types.js';
+import { ResourceHandler } from './resources/base.js';
 
 // ─── Built-in skills deployment ──────────────────────────
 //
@@ -76,8 +77,14 @@ export async function deployBuiltinSkills(teamConfig: TeamaiConfig, localConfig?
   const baseDir = localConfig ? resolveBaseDir(localConfig) : (process.env.HOME ?? '');
   let deployed = 0;
 
-  for (const [_tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
+  for (const [tool, toolPath] of Object.entries(teamConfig.toolPaths)) {
     if (!toolPath.skills) continue;
+
+    // Skip tools that are not installed
+    if (!await ResourceHandler.isToolInstalled(toolPath.skills, baseDir)) {
+      log.debug(`Skipping built-in skill deployment for ${tool}: tool not installed`);
+      continue;
+    }
 
     const targetSkillsDir = path.join(baseDir, toolPath.skills);
 

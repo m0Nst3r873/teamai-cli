@@ -72,3 +72,14 @@
 **Priority:** P2
 **Depends on:** V1 tag filtering 完成（已完成）。
 **Added:** 2026-04-01 by /plan-eng-review
+
+## isToolInstalled 的 split('/')[0] 路径假设
+**What:** `ResourceHandler.isToolInstalled()` 用 `toolPath.split('/')[0]` 提取工具根目录（如 `.claude/skills` → `.claude`），假设所有 toolPath 都是 `.<tool>/<type>` 两级格式。
+**Why:** 如果未来新增的工具配置为多级路径（如 `.config/claude/skills`），`split('/')[0]` 会返回 `.config`，导致检查错误地认为工具已安装（`.config/` 可能因为其他原因存在）。
+**Pros:** 修复后 isToolInstalled 能正确处理任意深度的 toolPath。
+**Cons:** 当前所有 7 个工具都是 `.<tool>/<type>` 格式，此问题暂不存在。提前修复是过度工程。
+**Context:** 由 outside voice (Claude subagent) 在 eng review 中发现。当前 `base.ts:68` 的实现。如果要修复，可以改为查找 toolPath 中第一个以 `.` 开头的路径段，或者在 teamai.yaml 中显式声明 toolRoot。建议等到真正引入非标准路径格式时再处理。
+**Effort:** S (human: ~1h / CC: ~5min)
+**Priority:** P4
+**Depends on:** 无。
+**Added:** 2026-04-11 by /plan-eng-review
