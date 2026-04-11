@@ -85,9 +85,10 @@ describe('autoUpvote', () => {
     expect(parsed.votes['api-timeout-2026-03-20-abc']).toBeDefined();
     expect(parsed.votes['api-timeout-2026-03-20-abc'].at).toBeTruthy();
 
-    // Check repo votes file
+    // Repo votes dir should NOT have the file — votes are only written
+    // to the repo by reportUsageToTeam() during `teamai pull`.
     const repoVotePath = path.join(repoPath, 'votes', 'jeff.yaml');
-    expect(fs.existsSync(repoVotePath)).toBe(true);
+    expect(fs.existsSync(repoVotePath)).toBe(false);
   });
 
   it('T13: idempotent — duplicate vote does not change file', async () => {

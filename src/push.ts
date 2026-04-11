@@ -1,6 +1,6 @@
 import readline from 'node:readline';
 import { autoDetectInit, loadStateForScope, saveStateForScope } from './config.js';
-import { pullRepo, pushRepoBranch, checkoutMaster, generateBranchName } from './utils/git.js';
+import { createGit, pullRepo, pushRepoBranch, checkoutMaster, generateBranchName } from './utils/git.js';
 import { getProvider } from './providers/index.js';
 import { log, spinner } from './utils/logger.js';
 import { getHandler } from './resources/index.js';
@@ -98,10 +98,35 @@ export async function push(options: GlobalOptions & { all?: boolean; role?: stri
   const scopeLabel = localConfig.scope;
 
   // Pull latest master BEFORE scanning so detection runs against up-to-date repo
+  // Stash any uncommitted changes first (e.g. votes written by autoUpvote in
+  // older versions) so that git pull doesn't fail on a dirty working tree.
   const pullSpin = spinner('Pulling latest master...').start();
   try {
-    await pullRepo(localConfig.repo.localPath);
-    pullSpin.succeed('Master up to date');
+    const repoPath = localConfig.repo.localPath;
+    const git = createGit(repoPath);
+    const status = await git.status();
+    const isDirty = status.modified.length > 0
+      || status.not_added.length > 0
+      || status.created.length > 0;
+    if (isDirty) {
+      await git.stash(['push', '-m', 'teamai-push: auto-stash before pull']);
+    }
+    try {
+      await pullRepo(repoPath);
+      pullSpin.succeed('Master up to date');
+    } finally {
+      // Restore stashed changes regardless of pull success/failure
+      if (isDirty) {
+        try {
+          await git.stash(['pop']);
+        } catch {
+          // Stash pop conflict — drop the stash to avoid accumulation;
+          // the dirty files were likely outdated anyway.
+          log.debug('Stash pop conflict, dropping stashed changes');
+          await git.stash(['drop']);
+        }
+      }
+    }
   } catch (e) {
     pullSpin.warn(`Pull failed: ${(e as Error).message}`);
   }

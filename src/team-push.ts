@@ -19,21 +19,21 @@ import { VOTES_LOCAL_DIR } from './types.js';
 //  [reportUsageToTeam()]
 //      │
 //      ▼
-//  [read ~/.teamai/usage.jsonl] ──missing/empty?──▶ SKIP
+//  [git pull latest] ── get freshest remote state ──
 //      │
 //      ▼
-//  [git pull latest] ── get freshest remote stats ──
-//      │
-//      ▼
-//  [read existing stats/<user>.yaml + merge with new events]
-//      │
-//      ▼
-//  [write merged stats/<user>.yaml]
+//  [read ~/.teamai/usage.jsonl] ──has events?──▶ merge stats
+//      │                                           │
+//      ▼                                           ▼
+//  [stage pending votes from ~/.teamai/votes/]  [write stats/<user>.yaml]
+//      │                                           │
+//      ▼  ◄────────────────────────────────────────┘
+//  [anything to push?] ──no──▶ SKIP
 //      │
 //      ▼
 //  [git add + commit + push (5s timeout)]
 //      │
-//      ├──success──▶ truncate JSONL
+//      ├──success──▶ truncate JSONL (if events existed)
 //      └──fail──▶ log debug + skip (next pull retries)
 //
 
@@ -102,29 +102,28 @@ export async function reportUsageToTeam(
 ): Promise<void> {
   try {
     const events = await readUsageEvents();
-    if (events.length === 0) {
-      log.debug('No usage events to report');
-      return;
-    }
+    const filesToPush: string[] = [];
 
-    const newStats = aggregateUsage(events);
-
-    const statsDir = path.join(repoPath, 'stats');
-    await ensureDir(statsDir);
-    const statsPath = path.join(statsDir, `${username}.yaml`);
-
-    // Pull first to get the freshest remote stats before merging
+    // Pull first to get the freshest remote state before merging
     // (prevents race condition where concurrent push overwrites our merge)
     await pullRepo(repoPath);
 
-    // See also: stats.ts mergeLocalAndReported() — same merge logic for display
-    const existing = await readExistingStats(statsPath);
-    const merged = mergeStats(existing, username, newStats);
+    // Process usage stats if any events exist
+    if (events.length > 0) {
+      const newStats = aggregateUsage(events);
+      const statsDir = path.join(repoPath, 'stats');
+      await ensureDir(statsDir);
+      const statsPath = path.join(statsDir, `${username}.yaml`);
 
-    await writeFile(statsPath, YAML.stringify(merged));
+      // See also: stats.ts mergeLocalAndReported() — same merge logic for display
+      const existing = await readExistingStats(statsPath);
+      const merged = mergeStats(existing, username, newStats);
 
-    // Also stage any pending local votes
-    const filesToPush: string[] = [`stats/${username}.yaml`];
+      await writeFile(statsPath, YAML.stringify(merged));
+      filesToPush.push(`stats/${username}.yaml`);
+    }
+
+    // Always stage pending local votes (independent of usage events)
     try {
       if (await pathExists(VOTES_LOCAL_DIR)) {
         const voteFiles = await listFiles(VOTES_LOCAL_DIR);
@@ -144,22 +143,31 @@ export async function reportUsageToTeam(
       log.error(`Vote staging skipped: ${(e as Error).message}`);
     }
 
-    // Commit and push with timeout
-    const pushPromise = pushRepoDirectly(
-      repoPath,
-      `[teamai] Update usage stats for ${username}`,
-      filesToPush,
-    );
+    // Nothing to push — skip commit
+    if (filesToPush.length === 0) {
+      log.debug('No usage events or votes to report');
+      return;
+    }
 
-    const timeoutPromise = new Promise<never>((_, reject) =>
+    // Commit and push with timeout
+    const commitMsg = events.length > 0
+      ? `[teamai] Update usage stats for ${username}`
+      : `[teamai] Update votes for ${username}`;
+    const pushPromise = pushRepoDirectly(repoPath, commitMsg, filesToPush);
+
+    const timeoutPromise = new Promise<never>((__, reject) =>
       setTimeout(() => reject(new Error('Auto-report timeout (5s)')), 5000),
     );
 
     await Promise.race([pushPromise, timeoutPromise]);
 
-    // Success — truncate reported events
-    await truncateUsageAfterReport(events.length);
-    log.debug(`Reported ${events.length} usage events to team repo`);
+    // Success — truncate reported events (only if we had any)
+    if (events.length > 0) {
+      await truncateUsageAfterReport(events.length);
+      log.debug(`Reported ${events.length} usage events to team repo`);
+    } else {
+      log.debug('Pushed pending votes to team repo');
+    }
   } catch (e) {
     log.error(`Auto-report skipped: ${(e as Error).message}`);
   }

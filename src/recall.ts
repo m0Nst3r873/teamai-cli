@@ -121,14 +121,12 @@ export async function autoUpvote(
       return;
     }
 
-    // Write to local votes dir
+    // Write to local votes dir only — repo copy is handled by
+    // reportUsageToTeam() during `teamai pull`, which properly
+    // commits the file. Writing directly to the repo leaves
+    // uncommitted changes that block `git pull` in `teamai push`.
     const yamlContent = YAML.stringify(userVotes);
     await writeFile(localVotePath, yamlContent);
-
-    // Also copy to team repo votes dir (will be pushed on next pull)
-    const repoVotesDir = path.join(repoPath, 'votes');
-    await ensureDir(repoVotesDir);
-    await writeFile(path.join(repoVotesDir, `${username}.yaml`), yamlContent);
 
     log.debug(`autoUpvote: recorded ${newVotes} new vote(s) for ${username}`);
   } catch (e) {
