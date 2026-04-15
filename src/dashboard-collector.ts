@@ -8,6 +8,7 @@ import {
   DASHBOARD_COMPACTION_THRESHOLD,
   DASHBOARD_IDLE_TIMEOUT_MS,
   DASHBOARD_STALE_TIMEOUT_MS,
+  DASHBOARD_STOPPED_DISPLAY_MS,
   type DashboardEvent,
   type DashboardEventType,
   type DashboardSession,
@@ -38,6 +39,64 @@ async function readStdin(): Promise<string> {
     chunks.push(chunk as Buffer);
   }
   return Buffer.concat(chunks).toString('utf-8');
+}
+
+// ─── Transcript reading ─────────────────────────────────
+
+/** Maximum bytes to read from the end of a transcript file. */
+const TRANSCRIPT_TAIL_BYTES = 10240;
+/** Maximum characters for stoppedOutput. */
+const STOPPED_OUTPUT_MAX_CHARS = 500;
+
+/**
+ * Read the last assistant message from a Claude Code transcript file.
+ * Uses tail-read (last 10KB) to avoid loading the entire file into memory.
+ * Returns empty string on any error (file missing, permission denied, etc.).
+ */
+export async function readLastAssistantOutput(transcriptPath: string): Promise<string> {
+  try {
+    const stat = await fs.promises.stat(transcriptPath);
+    const fileSize = stat.size;
+    if (fileSize === 0) return '';
+
+    const readSize = Math.min(fileSize, TRANSCRIPT_TAIL_BYTES);
+    const offset = Math.max(0, fileSize - readSize);
+
+    const fh = await fs.promises.open(transcriptPath, 'r');
+    try {
+      const buffer = Buffer.alloc(readSize);
+      await fh.read(buffer, 0, readSize, offset);
+      const tail = buffer.toString('utf-8');
+
+      // Parse JSONL lines from the tail, find the last assistant message
+      const lines = tail.split('\n').filter(l => l.trim());
+      let lastAssistantText = '';
+
+      for (const line of lines) {
+        try {
+          const entry = JSON.parse(line);
+          // Claude Code transcript format: {type: "assistant", message: {content: [{type: "text", text: "..."}]}}
+          if (entry.type === 'assistant' && entry.message?.content) {
+            const textParts = (entry.message.content as Array<{ type: string; text?: string }>)
+              .filter((c) => c.type === 'text' && c.text)
+              .map((c) => c.text);
+            if (textParts.length > 0) {
+              lastAssistantText = textParts.join('\n');
+            }
+          }
+        } catch {
+          // Skip malformed lines (expected when tail starts mid-line)
+        }
+      }
+
+      return lastAssistantText.slice(0, STOPPED_OUTPUT_MAX_CHARS);
+    } finally {
+      await fh.close();
+    }
+  } catch (e) {
+    log.warn(`dashboard: failed to read transcript: ${(e as Error).message}`);
+    return '';
+  }
 }
 
 /**
@@ -86,11 +145,12 @@ function mapEventType(hookEventName: string): DashboardEventType | null {
 /**
  * Parse a hook STDIN JSON payload into a DashboardEvent.
  * Returns null if the payload is invalid or irrelevant.
+ * For stop events, reads the transcript file to capture AI output.
  */
-export function parseHookEvent(
+export async function parseHookEvent(
   raw: string,
   tool: string,
-): DashboardEvent | null {
+): Promise<DashboardEvent | null> {
   if (!raw.trim()) return null;
 
   let hookData: Record<string, unknown>;
@@ -131,6 +191,15 @@ export function parseHookEvent(
   if (eventType === 'prompt_submit' && typeof hookData.prompt === 'string') {
     // Keep first 200 chars of the prompt as summary
     event.promptSummary = hookData.prompt.slice(0, 200);
+  }
+
+  // Extract transcript path and AI output from Stop event
+  if (eventType === 'stop' && typeof hookData.transcript_path === 'string') {
+    event.transcriptPath = hookData.transcript_path;
+    const output = await readLastAssistantOutput(hookData.transcript_path);
+    if (output) {
+      event.stoppedOutput = output;
+    }
   }
 
   return event;
@@ -207,9 +276,10 @@ export async function readEvents(eventsPath?: string): Promise<DashboardEvent[]>
  * This is the core "event sourcing" logic:
  * - session_start → create session
  * - tool_use → update lastActivity + lastTool
- * - prompt_submit → capture first prompt, mark as running
- * - stop → mark session as stopped
- * Then apply timeouts: idle after 5 min, remove after 30 min.
+ * - prompt_submit → capture first prompt + collect all prompts, mark as running
+ * - stop → mark session as stopped, capture AI output
+ * Then apply timeouts: idle after 5 min, remove stale after 30 min.
+ * Stopped sessions are kept for 30 seconds before removal.
  */
 export function rebuildSessions(events: DashboardEvent[]): DashboardSession[] {
   const sessions = new Map<string, DashboardSession>();
@@ -228,6 +298,9 @@ export function rebuildSessions(events: DashboardEvent[]): DashboardSession[] {
         lastActivity: event.timestamp,
         startedAt: event.timestamp,
         lastTool: '',
+        prompts: [],
+        stoppedOutput: '',
+        stoppedAt: '',
       };
       sessions.set(event.sessionId, session);
     }
@@ -251,9 +324,17 @@ export function rebuildSessions(events: DashboardEvent[]): DashboardSession[] {
         if (!session.promptSummary && event.promptSummary) {
           session.promptSummary = event.promptSummary;
         }
+        // Collect all prompts
+        if (event.promptSummary) {
+          session.prompts.push(event.promptSummary);
+        }
         break;
       case 'stop':
         session.status = 'stopped';
+        session.stoppedAt = event.timestamp;
+        if (event.stoppedOutput) {
+          session.stoppedOutput = event.stoppedOutput;
+        }
         break;
     }
   }
@@ -261,10 +342,19 @@ export function rebuildSessions(events: DashboardEvent[]): DashboardSession[] {
   // Apply timeouts
   const result: DashboardSession[] = [];
   for (const session of sessions.values()) {
-    if (session.status === 'stopped') continue;
-
     const lastActivityMs = new Date(session.lastActivity).getTime();
     const elapsed = now - lastActivityMs;
+
+    if (session.status === 'stopped') {
+      // Keep stopped sessions for 30 seconds, then remove
+      const stoppedAtMs = session.stoppedAt
+        ? new Date(session.stoppedAt).getTime()
+        : lastActivityMs;
+      const stoppedElapsed = now - stoppedAtMs;
+      if (stoppedElapsed > DASHBOARD_STOPPED_DISPLAY_MS) continue;
+      result.push(session);
+      continue;
+    }
 
     // Remove stale sessions (> 30 min)
     if (elapsed > DASHBOARD_STALE_TIMEOUT_MS) continue;
@@ -277,8 +367,12 @@ export function rebuildSessions(events: DashboardEvent[]): DashboardSession[] {
     result.push(session);
   }
 
-  // Sort by lastActivity descending (most recent first)
-  result.sort((a, b) => b.lastActivity.localeCompare(a.lastActivity));
+  // Sort: active sessions first (by lastActivity desc), stopped sessions last
+  result.sort((a, b) => {
+    if (a.status === 'stopped' && b.status !== 'stopped') return 1;
+    if (a.status !== 'stopped' && b.status === 'stopped') return -1;
+    return b.lastActivity.localeCompare(a.lastActivity);
+  });
   return result;
 }
 
@@ -329,7 +423,7 @@ export async function dashboardReport(toolArg?: string): Promise<void> {
     return;
   }
 
-  const event = parseHookEvent(raw, toolArg ?? 'claude');
+  const event = await parseHookEvent(raw, toolArg ?? 'claude');
   if (!event) return;
 
   await appendEvent(event);

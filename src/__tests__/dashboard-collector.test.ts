@@ -4,6 +4,7 @@ import path from 'node:path';
 import os from 'node:os';
 import {
   parseHookEvent,
+  readLastAssistantOutput,
   appendEvent,
   readEvents,
   rebuildSessions,
@@ -29,13 +30,13 @@ afterEach(() => {
 // ─── parseHookEvent ─────────────────────────────────────
 
 describe('parseHookEvent', () => {
-  it('parses SessionStart event', () => {
+  it('parses SessionStart event', async () => {
     const raw = JSON.stringify({
       hook_event_name: 'SessionStart',
       session_id: 'sess-123',
       cwd: '/home/jeff/project',
     });
-    const event = parseHookEvent(raw, 'claude');
+    const event = await parseHookEvent(raw, 'claude');
     expect(event).not.toBeNull();
     expect(event!.type).toBe('session_start');
     expect(event!.sessionId).toBe('sess-123');
@@ -43,132 +44,204 @@ describe('parseHookEvent', () => {
     expect(event!.cwd).toBe('/home/jeff/project');
   });
 
-  it('parses PostToolUse event with tool_name', () => {
+  it('parses PostToolUse event with tool_name', async () => {
     const raw = JSON.stringify({
       hook_event_name: 'PostToolUse',
       session_id: 'sess-123',
       tool_name: 'Edit',
       cwd: '/home/jeff/project',
     });
-    const event = parseHookEvent(raw, 'claude');
+    const event = await parseHookEvent(raw, 'claude');
     expect(event!.type).toBe('tool_use');
     expect(event!.toolName).toBe('Edit');
   });
 
-  it('parses UserPromptSubmit event with prompt', () => {
+  it('parses UserPromptSubmit event with prompt', async () => {
     const raw = JSON.stringify({
       hook_event_name: 'UserPromptSubmit',
       session_id: 'sess-123',
       prompt: 'Fix the login bug in auth.ts',
     });
-    const event = parseHookEvent(raw, 'claude-internal');
+    const event = await parseHookEvent(raw, 'claude-internal');
     expect(event!.type).toBe('prompt_submit');
     expect(event!.promptSummary).toBe('Fix the login bug in auth.ts');
     expect(event!.tool).toBe('claude-internal');
   });
 
-  it('truncates long prompts to 200 chars', () => {
+  it('truncates long prompts to 200 chars', async () => {
     const longPrompt = 'x'.repeat(500);
     const raw = JSON.stringify({
       hook_event_name: 'UserPromptSubmit',
       session_id: 'sess-123',
       prompt: longPrompt,
     });
-    const event = parseHookEvent(raw, 'claude');
+    const event = await parseHookEvent(raw, 'claude');
     expect(event!.promptSummary!.length).toBe(200);
   });
 
-  it('parses Stop event', () => {
+  it('parses Stop event', async () => {
     const raw = JSON.stringify({
       hook_event_name: 'Stop',
       session_id: 'sess-123',
     });
-    const event = parseHookEvent(raw, 'claude');
+    const event = await parseHookEvent(raw, 'claude');
     expect(event!.type).toBe('stop');
   });
 
-  it('returns null for empty input', () => {
-    expect(parseHookEvent('', 'claude')).toBeNull();
-    expect(parseHookEvent('   ', 'claude')).toBeNull();
+  it('returns null for empty input', async () => {
+    expect(await parseHookEvent('', 'claude')).toBeNull();
+    expect(await parseHookEvent('   ', 'claude')).toBeNull();
   });
 
-  it('returns null for invalid JSON', () => {
-    expect(parseHookEvent('not json', 'claude')).toBeNull();
+  it('returns null for invalid JSON', async () => {
+    expect(await parseHookEvent('not json', 'claude')).toBeNull();
   });
 
-  it('parses Cursor camelCase sessionStart event', () => {
+  it('parses Cursor camelCase sessionStart event', async () => {
     const raw = JSON.stringify({
       hook_event_name: 'sessionStart',
       session_id: 'sess-cursor-1',
       cwd: '/home/jeff/project',
     });
-    const event = parseHookEvent(raw, 'cursor');
+    const event = await parseHookEvent(raw, 'cursor');
     expect(event).not.toBeNull();
     expect(event!.type).toBe('session_start');
     expect(event!.sessionId).toBe('sess-cursor-1');
     expect(event!.tool).toBe('cursor');
   });
 
-  it('parses Cursor camelCase stop event', () => {
+  it('parses Cursor camelCase stop event', async () => {
     const raw = JSON.stringify({
       hook_event_name: 'stop',
       session_id: 'sess-cursor-2',
     });
-    const event = parseHookEvent(raw, 'cursor');
+    const event = await parseHookEvent(raw, 'cursor');
     expect(event!.type).toBe('stop');
   });
 
-  it('parses Cursor camelCase postToolUse event', () => {
+  it('parses Cursor camelCase postToolUse event', async () => {
     const raw = JSON.stringify({
       hook_event_name: 'postToolUse',
       session_id: 'sess-cursor-3',
       tool_name: 'Read',
     });
-    const event = parseHookEvent(raw, 'cursor');
+    const event = await parseHookEvent(raw, 'cursor');
     expect(event!.type).toBe('tool_use');
     expect(event!.toolName).toBe('Read');
   });
 
-  it('parses Cursor beforeSubmitPrompt event', () => {
+  it('parses Cursor beforeSubmitPrompt event', async () => {
     const raw = JSON.stringify({
       hook_event_name: 'beforeSubmitPrompt',
       session_id: 'sess-cursor-4',
       prompt: 'Fix the bug in auth.ts',
     });
-    const event = parseHookEvent(raw, 'cursor');
+    const event = await parseHookEvent(raw, 'cursor');
     expect(event!.type).toBe('prompt_submit');
     expect(event!.promptSummary).toBe('Fix the bug in auth.ts');
   });
 
-  it('returns null for unknown hook event', () => {
+  it('returns null for unknown hook event', async () => {
     const raw = JSON.stringify({
       hook_event_name: 'UnknownEvent',
       session_id: 'sess-123',
     });
-    expect(parseHookEvent(raw, 'claude')).toBeNull();
+    expect(await parseHookEvent(raw, 'claude')).toBeNull();
   });
 
-  it('falls back to PID+cwd when session_id missing', () => {
+  it('falls back to PID+cwd when session_id missing', async () => {
     const raw = JSON.stringify({
       hook_event_name: 'SessionStart',
       cwd: '/home/jeff/project',
     });
-    const event = parseHookEvent(raw, 'claude');
+    const event = await parseHookEvent(raw, 'claude');
     expect(event!.sessionId).toMatch(/^pid-\d+-\/home\/jeff\/project$/);
   });
 
-  it('uses CLAUDE_SESSION_ID env as fallback', () => {
+  it('uses CLAUDE_SESSION_ID env as fallback', async () => {
     process.env.CLAUDE_SESSION_ID = 'env-sess-456';
     try {
       const raw = JSON.stringify({
         hook_event_name: 'SessionStart',
         cwd: '/home/jeff/project',
       });
-      const event = parseHookEvent(raw, 'claude');
+      const event = await parseHookEvent(raw, 'claude');
       expect(event!.sessionId).toBe('env-sess-456');
     } finally {
       delete process.env.CLAUDE_SESSION_ID;
     }
+  });
+
+  it('captures stoppedOutput from transcript_path', async () => {
+    // Create a mock transcript file
+    const transcriptPath = path.join(tmpDir, 'transcript.jsonl');
+    const transcriptLines = [
+      JSON.stringify({ type: 'human', message: { content: [{ type: 'text', text: 'Hello' }] } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'AI response here' }] } }),
+    ];
+    fs.writeFileSync(transcriptPath, transcriptLines.join('\n') + '\n');
+
+    const raw = JSON.stringify({
+      hook_event_name: 'Stop',
+      session_id: 'sess-transcript',
+      transcript_path: transcriptPath,
+    });
+    const event = await parseHookEvent(raw, 'claude');
+    expect(event!.type).toBe('stop');
+    expect(event!.stoppedOutput).toBe('AI response here');
+    expect(event!.transcriptPath).toBe(transcriptPath);
+  });
+});
+
+// ─── readLastAssistantOutput ──────────────────────────────
+
+describe('readLastAssistantOutput', () => {
+  it('reads last assistant message from transcript', async () => {
+    const transcriptPath = path.join(tmpDir, 'transcript.jsonl');
+    const lines = [
+      JSON.stringify({ type: 'human', message: { content: [{ type: 'text', text: 'Hello' }] } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'First response' }] } }),
+      JSON.stringify({ type: 'human', message: { content: [{ type: 'text', text: 'Follow up' }] } }),
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Final response' }] } }),
+    ];
+    fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+
+    const output = await readLastAssistantOutput(transcriptPath);
+    expect(output).toBe('Final response');
+  });
+
+  it('returns empty string for nonexistent file', async () => {
+    const output = await readLastAssistantOutput('/nonexistent/path/transcript.jsonl');
+    expect(output).toBe('');
+  });
+
+  it('returns empty string for empty file', async () => {
+    const transcriptPath = path.join(tmpDir, 'empty.jsonl');
+    fs.writeFileSync(transcriptPath, '');
+    const output = await readLastAssistantOutput(transcriptPath);
+    expect(output).toBe('');
+  });
+
+  it('truncates output to 500 chars', async () => {
+    const transcriptPath = path.join(tmpDir, 'long.jsonl');
+    const longText = 'x'.repeat(1000);
+    const line = JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: longText }] } });
+    fs.writeFileSync(transcriptPath, line + '\n');
+
+    const output = await readLastAssistantOutput(transcriptPath);
+    expect(output.length).toBe(500);
+  });
+
+  it('skips malformed lines gracefully', async () => {
+    const transcriptPath = path.join(tmpDir, 'malformed.jsonl');
+    const lines = [
+      'NOT JSON',
+      JSON.stringify({ type: 'assistant', message: { content: [{ type: 'text', text: 'Valid response' }] } }),
+    ];
+    fs.writeFileSync(transcriptPath, lines.join('\n') + '\n');
+
+    const output = await readLastAssistantOutput(transcriptPath);
+    expect(output).toBe('Valid response');
   });
 });
 
@@ -247,13 +320,56 @@ describe('rebuildSessions', () => {
     expect(sessions[0].promptSummary).toBe('Fix the bug');
   });
 
-  it('removes stopped sessions', () => {
+  it('keeps recently stopped sessions for 30 seconds', () => {
     const events: DashboardEvent[] = [
       { type: 'session_start', timestamp: now, sessionId: 's1', tool: 'claude', cwd: '/proj' },
       { type: 'stop', timestamp: now, sessionId: 's1', tool: 'claude' },
     ];
     const sessions = rebuildSessions(events);
+    expect(sessions).toHaveLength(1);
+    expect(sessions[0].status).toBe('stopped');
+  });
+
+  it('removes stopped sessions after 30 seconds', () => {
+    const oldTime = new Date(Date.now() - 35 * 1000).toISOString(); // 35 sec ago
+    const events: DashboardEvent[] = [
+      { type: 'session_start', timestamp: oldTime, sessionId: 's1', tool: 'claude', cwd: '/proj' },
+      { type: 'stop', timestamp: oldTime, sessionId: 's1', tool: 'claude' },
+    ];
+    const sessions = rebuildSessions(events);
     expect(sessions).toHaveLength(0);
+  });
+
+  it('collects all prompts in session', () => {
+    const events: DashboardEvent[] = [
+      { type: 'session_start', timestamp: now, sessionId: 's1', tool: 'claude', cwd: '/proj' },
+      { type: 'prompt_submit', timestamp: now, sessionId: 's1', tool: 'claude', promptSummary: 'First prompt' },
+      { type: 'prompt_submit', timestamp: now, sessionId: 's1', tool: 'claude', promptSummary: 'Second prompt' },
+    ];
+    const sessions = rebuildSessions(events);
+    expect(sessions[0].prompts).toEqual(['First prompt', 'Second prompt']);
+    expect(sessions[0].promptSummary).toBe('First prompt');
+  });
+
+  it('captures stoppedOutput from stop event', () => {
+    const events: DashboardEvent[] = [
+      { type: 'session_start', timestamp: now, sessionId: 's1', tool: 'claude', cwd: '/proj' },
+      { type: 'stop', timestamp: now, sessionId: 's1', tool: 'claude', stoppedOutput: 'AI final output' },
+    ];
+    const sessions = rebuildSessions(events);
+    expect(sessions[0].stoppedOutput).toBe('AI final output');
+  });
+
+  it('sorts active sessions before stopped sessions', () => {
+    const events: DashboardEvent[] = [
+      { type: 'session_start', timestamp: now, sessionId: 's1', tool: 'claude', cwd: '/proj' },
+      { type: 'stop', timestamp: now, sessionId: 's1', tool: 'claude' },
+      { type: 'session_start', timestamp: now, sessionId: 's2', tool: 'claude', cwd: '/proj2' },
+    ];
+    const sessions = rebuildSessions(events);
+    expect(sessions).toHaveLength(2);
+    expect(sessions[0].sessionId).toBe('s2'); // active first
+    expect(sessions[1].sessionId).toBe('s1'); // stopped last
   });
 
   it('marks idle sessions after timeout', () => {

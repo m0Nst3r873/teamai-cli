@@ -255,6 +255,10 @@ export interface DashboardEvent {
   toolName?: string;
   /** Inferred session status at event time */
   status?: DashboardSessionStatus;
+  /** AI output captured from transcript at session stop (truncated to 500 chars) */
+  stoppedOutput?: string;
+  /** Path to Claude Code transcript file (from Stop hook STDIN) */
+  transcriptPath?: string;
 }
 
 export interface DashboardSession {
@@ -274,6 +278,12 @@ export interface DashboardSession {
   startedAt: string;
   /** Last tool used (e.g. "Edit", "Bash") */
   lastTool: string;
+  /** All user prompts collected during the session */
+  prompts: string[];
+  /** AI output captured from transcript at session stop */
+  stoppedOutput: string;
+  /** ISO 8601 timestamp of when the session was stopped */
+  stoppedAt: string;
 }
 
 export const DASHBOARD_EVENTS_DIR = `${TEAMAI_HOME}/dashboard`;
@@ -285,6 +295,8 @@ export const DASHBOARD_IDLE_TIMEOUT_MS = 5 * 60 * 1000;
 export const DASHBOARD_STALE_TIMEOUT_MS = 30 * 60 * 1000;
 /** Compact JSONL when it exceeds this many lines */
 export const DASHBOARD_COMPACTION_THRESHOLD = 10_000;
+/** Stopped sessions are removed from the dashboard after this many ms */
+export const DASHBOARD_STOPPED_DISPLAY_MS = 30 * 1000;
 
 // ─── Contribute (session auto-contribute) ────────────
 //
