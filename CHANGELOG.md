@@ -2,6 +2,12 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [0.14.2] (2026-04-16)
+
+### 🐛 修复
+
+- **pull role filtering**: 修复当团队无 `tags.yaml` 或用户无 tag 订阅时，`teamai pull` 同步角色外命名空间 skills 的问题 (!148)
+
 ## [0.14.0] (2026-04-16)
 
 ### ✨ 新功能
