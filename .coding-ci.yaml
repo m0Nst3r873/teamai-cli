@@ -45,17 +45,37 @@ stages:
         - echo "=== E2E Tests ==="
         - npm ci --ignore-scripts
         - npm run build
-        - "if [ -n \"$TEAMAI_TEST_TOKEN\" ] && [ -n \"$TEAMAI_TEST_REPO_URL\" ]; then\n\
-          \  echo \"Setting up teamai for remote E2E tests...\"\n  mkdir -p ~/.teamai\n\
-          \  REPO_LOCAL=~/.teamai/team-repo\n  if [ ! -d \"$REPO_LOCAL\" ]; then\n\
-          \    case \"$TEAMAI_TEST_REPO_URL\" in\n      http://*|https://*) CLONE_URL=\"\
-          $TEAMAI_TEST_REPO_URL\";;\n      *) CLONE_URL=\"https://git.woa.com/${TEAMAI_TEST_REPO_URL}.git\"\
-          ;;\n    esac\n    git clone -c \"http.extraHeader=PRIVATE-TOKEN: $TEAMAI_TEST_TOKEN\"\
-          \ \"$CLONE_URL\" \"$REPO_LOCAL\" || { echo \"Clone failed\"; exit 1; }\n\
-          \  fi\n  cat > ~/.teamai/config.yaml <<EOFCFG\nrepo:\n  localPath: \"$REPO_LOCAL\"\
-          \n  remote: \"$TEAMAI_TEST_REPO_URL\"\nusername: ci\nEOFCFG\n  echo \"teamai\
-          \ config ready\"\nfi\n"
-        - npx vitest run --config vitest.e2e.config.ts
+        - |
+          # CI commits (tags add/remove, env add/remove, source roundtrip 等
+          # 测试会改写 fixture 仓工作树) 需要 git identity，否则 git 会拒绝。
+          git config --global user.email "ci@teamai.test"
+          git config --global user.name "TeamAI CI"
+        - |
+          # 准备 teamai 远程 e2e 测试 fixture（user-scope ~/.teamai）。
+          # 没配 secrets 时（如 fork 仓的 PR）跳过，e2e.test.ts 里 skipIf
+          # 会把 remote 用例自动跳过。
+          if [ -n "$TEAMAI_TEST_TOKEN" ] && [ -n "$TEAMAI_TEST_REPO_URL" ]; then
+            echo "Setting up teamai for remote E2E tests..."
+            mkdir -p ~/.teamai
+            REPO_LOCAL=~/.teamai/team-repo
+            if [ ! -d "$REPO_LOCAL" ]; then
+              case "$TEAMAI_TEST_REPO_URL" in
+                http://*|https://*) CLONE_URL="$TEAMAI_TEST_REPO_URL";;
+                *) CLONE_URL="https://git.woa.com/${TEAMAI_TEST_REPO_URL}.git";;
+              esac
+              git clone -c "http.extraHeader=PRIVATE-TOKEN: $TEAMAI_TEST_TOKEN" \
+                "$CLONE_URL" "$REPO_LOCAL" || { echo "Clone failed"; exit 1; }
+            fi
+            cat > ~/.teamai/config.yaml <<EOFCFG
+          repo:
+            localPath: "$REPO_LOCAL"
+            remote: "$TEAMAI_TEST_REPO_URL"
+          username: ci
+          updatePolicy: auto
+          EOFCFG
+            echo "teamai config ready"
+          fi
+        - npx vitest run --config vitest.e2e.config.ts --reporter=verbose
 - stage: publish
   tasks:
   - task: publish
@@ -98,6 +118,16 @@ finally:
       params:
         cmds:
         - echo "CI pipeline 失败!"
+        - |
+          # e2e fixture 仓清理：失败可能在 fixture 仓工作树留下 dirty state，
+          # 下次跑会卡住。守卫 [ -d ... ] 兜底其他 stage 失败时仓库不存在的情况。
+          REPO_LOCAL=~/.teamai/team-repo
+          if [ -d "$REPO_LOCAL/.git" ]; then
+            echo "Cleaning up e2e fixture repo state..."
+            cd "$REPO_LOCAL"
+            git reset --hard HEAD || true
+            git clean -fdx || true
+          fi
 notifications:
 - name: TeamAI CLI CI 通知
   channel: ENWECHAT
