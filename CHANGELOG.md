@@ -2,6 +2,16 @@
 
 All notable changes to this project will be documented in this file. See [standard-version](https://github.com/conventional-changelog/standard-version) for commit guidelines.
 
+## [Unreleased]
+
+### ✨ 新功能
+
+- **跨 agent skills 视图**：`teamai list` 新增 `--source <repo|local|all>` 和 `--agent <id>` 参数（默认 `--source all`）。`local` / `all` 模式会扫描所有已安装 AI agent 的 skills 目录，每个 skill 标注来源 `[team]` / `[builtin]` / `[source:<name>]` / `[local-only]`。`--verbose` 时展开每个 agent 的 skill 列表与描述摘要。未安装的 agent 不出现在输出里
+- **Known agents 注册表**：内置 28 个 AI agent 路径（Claude Code / Cursor / Codex / Gemini CLI / Aider / Augment / Hermes / Copilot / KiloCode / Kiro / OpenCode / Qoder / Trae / Windsurf / WorkBuddy 等），自动检测哪些已安装。`teamai.yaml` 中显式配置的 `toolPaths` 优先生效
+- **`teamai skill` 子命令组**：
+  - `teamai skill` 或 `teamai skill list`：等价 `teamai list skills --source all`
+  - `teamai skill show <name>`：查看单个 skill 的来源标签、命名空间、贡献者、`tags.yaml` 中的 tags、已安装的 agent 列表，以及 frontmatter 中的描述（最多 160 字符）。不渲染完整 SKILL.md 正文
+
 ## [0.14.2] (2026-04-16)
 
 ### 🐛 修复

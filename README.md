@@ -62,7 +62,8 @@ CLI 会根据用户传入的 repo URL 自动选择 provider：
 | `teamai push [--all] [--role <id>]` | 推送本地新资源到独立分支并创建 Merge Request；新 skill 交互式选择目标命名空间，可用 `--role` 覆盖 |
 | `teamai pull [--silent]` | 拉取团队资源并注入到本地 AI 工具（支持双 scope 依次拉取） |
 | `teamai status` | 查看本地 vs 团队仓库差异 |
-| `teamai list [type]` | 列出资源（skills\|rules\|docs） |
+| `teamai list [type] [--source repo\|local\|all] [--agent <id>]` | 列出资源（skills\|rules\|docs\|env）；`--source local` 或 `all` 时会扫描已安装 AI agent 下的 skills 目录，并标注每个 skill 的来源 (`[team]` / `[builtin]` / `[source:<name>]` / `[local-only]`) |
+| `teamai skill [list\|show <name>]` | 默认列出全部 skill；`show <name>` 输出指定 skill 的来源、贡献者、已安装的 agent 列表与描述摘要 |
 | `teamai members` | 列出已注册的团队成员 |
 | `teamai remove <type> <name>` | 从团队仓库和本地删除资源并创建 MR（skills\|rules） |
 | `teamai roles` | 管理团队角色（`init`/`list`/`set`/`add`/`remove`/`update`） |

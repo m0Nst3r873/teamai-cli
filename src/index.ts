@@ -66,11 +66,40 @@ program
 
 program
   .command('list [type]')
-  .description('List resources (skills|rules|docs|env)')
-  .action(async (type) => {
+  .description('List resources (skills|rules|docs|env). For skills, --source local/all also scans installed AI agent skill directories.')
+  .option('--source <src>', 'Where to look for skills: repo | local | all', 'all')
+  .option('--agent <name>', 'Filter local agents by id (only applies to skills)')
+  .action(async (type, cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;
     const { list } = await import('./status.js');
-    await list(type, globalOpts);
+    await list(type, { ...globalOpts, ...cmdOpts });
+  });
+
+const skillCmd = program
+  .command('skill')
+  .description('List and inspect skills (default: list all skills across repo + installed agents)')
+  .action(async () => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { list } = await import('./status.js');
+    await list('skills', { ...globalOpts, source: 'all' });
+  });
+
+skillCmd
+  .command('list')
+  .description('List all skills (alias for: teamai list skills --source all)')
+  .action(async () => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { list } = await import('./status.js');
+    await list('skills', { ...globalOpts, source: 'all' });
+  });
+
+skillCmd
+  .command('show <name>')
+  .description('Show skill metadata: source / contributors / installed agents / description')
+  .action(async (name: string, cmdOpts) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { skillShow } = await import('./skill-cmd.js');
+    await skillShow(name, { ...globalOpts, ...cmdOpts });
   });
 
 const membersCmd = program
