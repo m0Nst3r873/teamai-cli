@@ -2,7 +2,7 @@
 
 > **@tencent/teamai-cli** — 团队 AI 经验共享框架
 >
-> 帮助团队统一管理和共享 Skills、Rules、Docs、Env 等资源，自动同步到 Claude Code、CodeBuddy、Cursor 等 AI 编程工具中。
+> 帮助团队统一管理和共享 Skills、Rules、Docs、Env 等资源，自动同步到 Claude Code、CodeBuddy、Cursor、Codex、Gemini CLI、Windsurf 等 AI 编程工具中。
 
 ---
 
@@ -62,7 +62,7 @@ npm install -g @tencent/teamai-cli --registry=http://r.tnpm.oa.com
 teamai --version
 ```
 
-**前置依赖：** Node.js ≥ 18、Git、`gf` CLI（腾讯工蜂命令行工具）
+**前置依赖：** Node.js ≥ 18、Git（`gf` CLI 仅 TGit 用户需要，`teamai init` 时会自动安装）
 
 ---
 
@@ -361,7 +361,7 @@ teamai push
 
 ### 贡献知识
 
-AI 通过 Hooks 追踪你的编码会话。当检测到高价值会话（工具调用多样、涉及 skill 使用、有错误修复），会自动提醒：
+AI 通过 Hooks 追踪你的编码会话。当会话结束时（Stop hook），系统会对本次会话进行智能评分（工具调用多样性、skill 使用、错误修复等），达标后会自动提醒：
 
 ```
 建议运行 /teamai-share-learnings 分享经验
@@ -538,6 +538,7 @@ teamai stats           # skill 使用统计
 teamai update          # CLI 更新
 teamai remove skills <name>   # 删除资源
 teamai remove rules <name>
+teamai remove wiki <name>
 ```
 
 ### 跨团队 Skill 订阅

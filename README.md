@@ -1,9 +1,9 @@
-# TeamAI — 团队 AI 经验共享框架
+# TeamAI — 基于 Git 的团队 AI 经验共享工具
 
-团队 AI 经验共享框架。自动在团队成员之间同步 skills、rules、docs 等 AI 工具配置。
+基于 Git 的团队 AI 经验共享工具。自动在团队成员之间同步 skills、rules、docs 等 AI 工具配置。
 
-支持的 AI 工具：Claude Code、Codex、Cursor、CodeBuddy IDE（及各自的 Internal 版本）。
-支持的 git 托管平台：**GitHub**（默认）、腾讯工蜂 TGit（`git.woa.com`）。
+支持的 AI 工具：Claude Code、Codex、Cursor、CodeBuddy IDE（及各自的 Internal 版本），以及 Gemini CLI、Windsurf、Trae、Aider、Amp、OpenClaw 等 20+ 种 AI 编程工具（Skills 同步）。
+支持的 git 托管平台：**GitHub**、腾讯工蜂 TGit（`git.woa.com`），根据 repo URL 或安装来源自动识别。
 
 > 📖 **完整使用指南**：[docs/usage-guide.md](docs/usage-guide.md) — 涵盖从团队创建到日常使用的全流程。
 > 📚 **Provider 说明**：[docs/providers.md](docs/providers.md) — GitHub / TGit 差异与认证配置。
@@ -62,10 +62,10 @@ CLI 会根据用户传入的 repo URL 自动选择 provider：
 | `teamai push [--all] [--role <id>]` | 推送本地新资源到独立分支并创建 Merge Request；新 skill 交互式选择目标命名空间，可用 `--role` 覆盖 |
 | `teamai pull [--silent]` | 拉取团队资源并注入到本地 AI 工具（支持双 scope 依次拉取） |
 | `teamai status` | 查看本地 vs 团队仓库差异 |
-| `teamai list [type] [--source repo\|local\|all] [--agent <id>]` | 列出资源（skills\|rules\|docs\|env）；`--source local` 或 `all` 时会扫描已安装 AI agent 下的 skills 目录，并标注每个 skill 的来源 (`[team]` / `[builtin]` / `[source:<name>]` / `[local-only]`) |
+| `teamai list [type] [--source repo\|local\|all] [--agent <id>]` | 列出资源（skills\|rules\|docs\|env\|wiki）；`--source local` 或 `all` 时会扫描已安装 AI agent 下的 skills 目录，并标注每个 skill 的来源 (`[team]` / `[builtin]` / `[source:<name>]` / `[local-only]`) |
 | `teamai skill [list\|show <name>]` | 默认列出全部 skill；`show <name>` 输出指定 skill 的来源、贡献者、已安装的 agent 列表与描述摘要 |
 | `teamai members` | 列出已注册的团队成员 |
-| `teamai remove <type> <name>` | 从团队仓库和本地删除资源并创建 MR（skills\|rules） |
+| `teamai remove <type> <name>` | 从团队仓库和本地删除资源并创建 MR（skills\|rules\|wiki） |
 | `teamai roles` | 管理团队角色（`init`/`list`/`set`/`add`/`remove`/`update`） |
 | `teamai source` | 管理跨团队 skill 订阅源（`add`/`remove`/`list`/`browse`） |
 | `teamai contribute --file <path> [--scope <user\|project>]` | 将 AI 生成的经验文档推送到团队仓库 |
@@ -101,7 +101,7 @@ CLI 会根据用户传入的 repo URL 自动选择 provider：
 
 - `teamai push` 会创建独立分支（`teamai/push/<user>/<timestamp>`），推送后自动创建 Merge Request 并指派 reviewers
 - `teamai init` 初始化时可配置默认 reviewers（记录在 `teamai.yaml` 的 `reviewers` 字段）
-- `teamai init` 会自动注入与各工具格式对齐的 hooks（含 `sessionStart`、`stop`、`postToolUse`、`userPromptSubmit` 等），会话中会执行 `teamai pull`、`teamai update`、追踪与仪表盘等（支持 Claude Code、Codex、Codex Internal、Claude Code Internal、Cursor、CodeBuddy IDE）
+- `teamai init` 会自动注入与各工具格式对齐的 hooks（含 `SessionStart`、`Stop`、`PostToolUse`、`UserPromptSubmit` 等），会话中会执行 `teamai pull`、`teamai update`、追踪与仪表盘等（支持 Claude Code、Codex、Claude Code Internal、Codex Internal、Cursor、CodeBuddy IDE、OpenClaw、WorkBuddy）
 - Skills 同步到 `~/.claude/skills/`、`~/.codex/skills/`、`~/.codex-internal/skills/`、`~/.claude-internal/skills/`、`~/.cursor/skills/`、`~/.codebuddy/skills/`
 - Rules 同步到各工具的 rules 目录，并通过标记注释合并到 `CLAUDE.md`（支持 claude、claude-internal、codebuddy）
 - Knowledge 同步到 `~/.teamai/docs/`
@@ -231,23 +231,21 @@ TeamAI 支持两种 scope，可以共存：
 
 ## 经验自动分享
 
-当一次 AI coding session 使用超过 50 次工具调用时，系统会智能评估 session 价值并提示分享：
+当一次 AI coding session 结束时，系统会通过 Stop hook 智能评估 session 价值并提示分享：
 
 ```
 AI coding session (持续工作中...)
     │
-    ▼  PostToolUse hook 每次工具调用自动计数
+    ▼  PostToolUse hook 持续追踪工具调用和 skill 使用
     │
-    ├─ < 50 次 → 静默计数（~1ms，不影响性能）
+    ▼  会话结束（Stop hook 触发）
     │
-    ▼  达到 50 次
+    ├─ 智能评分：工具调用数量 + 工具多样性 + skill 使用 + 错误重试 + session 时长
+    │  （从 dashboard events.jsonl 提取，一次性评估，满分 100）
     │
-    ├─ 智能评分：工具多样性 + skill 使用 + 错误重试 + session 时长
-    │  （从 dashboard events.jsonl 提取，一次性评估）
+    ├─ 分数 < 35 → 不打扰（工具调用少或缺乏多样性，没有总结价值）
     │
-    ├─ 分数不够 → 不打扰（只是重复调用同一个工具，没有总结价值）
-    │
-    ▼  分数达标
+    ▼  分数 ≥ 35
     │
     AI 提示："本次 session 内容丰富，建议运行 /teamai-share-learnings 分享经验"
     │
@@ -299,16 +297,16 @@ npm update -g teamai-cli   # 或手动触发 npm 升级
 
 如需手动覆盖 registry，可以设置环境变量 `TEAMAI_NPM_REGISTRY=<url>`。
 
-### Auto-Update Control
+### 自动更新控制
 
-Auto-update runs via the Stop hook at session end. Control it at two levels:
+自动更新通过 Stop hook 在会话结束时执行，可在两个层级控制：
 
-| Config | File | Field | Values |
-|--------|------|-------|--------|
-| Team default | `teamai.yaml` | `autoUpdate` | `true` (default) / `false` |
-| User override | `~/.teamai/config.yaml` | `updatePolicy` | `auto` / `prompt` / `skip` |
+| 配置层级 | 文件 | 字段 | 可选值 |
+|---------|------|------|-------|
+| 团队默认 | `teamai.yaml` | `autoUpdate` | `true`（默认）/ `false` |
+| 用户覆盖 | `~/.teamai/config.yaml` | `updatePolicy` | `auto` / `prompt` / `skip` |
 
-User `updatePolicy` always takes precedence over team `autoUpdate`.
+用户级 `updatePolicy` 始终优先于团队级 `autoUpdate`。
 
 ## 许可证
 
