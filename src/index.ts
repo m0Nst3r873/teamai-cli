@@ -36,6 +36,7 @@ program
   .command('push')
   .description('Push local resources to team repo')
   .option('--all', 'Push all without confirmation')
+  .option('--skill <path>', 'Push a specific skill by path (e.g., ~/.claude/skills/hai/my-skill or skills/hai_dev/my-skill)')
   .option('--role <id>', 'Target role namespace for pushed project skills')
   .action(async (cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;

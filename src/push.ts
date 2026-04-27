@@ -148,6 +148,109 @@ export async function push(options: GlobalOptions & { all?: boolean; role?: stri
 
   spin.stop();
 
+  // ── Handle --skill parameter: filter to a single specific skill ──────
+  if (options.skill) {
+    // Normalize the input path (expand ~, resolve to absolute)
+    const os = await import('node:os');
+    const skillPath = options.skill.startsWith('~')
+      ? path.join(os.homedir(), options.skill.slice(1))
+      : path.resolve(options.skill);
+
+    // Try to find matching skill from scan results first
+    let matchedItem: ResourceItem | undefined;
+
+    for (const item of allItems) {
+      if (item.type !== 'skills') continue;
+
+      // Match by sourcePath (absolute path)
+      if (path.resolve(item.sourcePath) === skillPath) {
+        matchedItem = item;
+        break;
+      }
+
+      // Match by skill name
+      if (item.name === path.basename(skillPath)) {
+        matchedItem = item;
+        break;
+      }
+
+      // Match by partial path (e.g., "skills/namespace/skillname" in sourcePath)
+      const skillInput = options.skill.replace(/^~/, os.homedir());
+      if (item.sourcePath.endsWith(skillInput) || item.sourcePath.includes(path.sep + skillInput)) {
+        matchedItem = item;
+        break;
+      }
+    }
+
+    // If not found in scan results, force-construct a ResourceItem from the
+    // specified path. This handles cases where:
+    //   - The skill exists in both a subdirectory (with modifications) and
+    //     at the top level (pulled copy identical to team repo), causing the
+    //     scanner to see the top-level copy first and skip the modified one.
+    //   - The skill content is identical to team repo (no diff detected) but
+    //     the user explicitly wants to push it anyway.
+    if (!matchedItem) {
+      if (await pathExists(skillPath) && await pathExists(path.join(skillPath, 'SKILL.md'))) {
+        const skillName = path.basename(skillPath);
+
+        // Try to detect existing namespace from team repo
+        let namespace: string | undefined;
+        let status: 'new' | 'modified' = 'new';
+        const teamSkillsDir = path.join(localConfig.repo.localPath, 'skills');
+        if (await pathExists(teamSkillsDir)) {
+          const { listDirs } = await import('./utils/fs.js');
+          const topDirs = await listDirs(teamSkillsDir);
+          for (const dir of topDirs) {
+            const candidatePath = path.join(teamSkillsDir, dir, skillName);
+            if (await pathExists(candidatePath)) {
+              // Check if this is a namespace dir (not a direct skill)
+              const isNamespace = !await pathExists(path.join(teamSkillsDir, dir, 'SKILL.md'));
+              if (isNamespace) {
+                namespace = dir;
+              }
+              status = 'modified';
+              break;
+            }
+          }
+          // Also check flat layout
+          if (!namespace && await pathExists(path.join(teamSkillsDir, skillName))) {
+            status = 'modified';
+          }
+        }
+
+        const relPath = namespace
+          ? `skills/${namespace}/${skillName}`
+          : `skills/${skillName}`;
+
+        matchedItem = {
+          name: skillName,
+          type: 'skills',
+          sourcePath: skillPath,
+          relativePath: relPath,
+          status,
+          namespace,
+        };
+        log.debug(`Force-pushing skill from explicit path: ${skillPath}`);
+      } else {
+        const skillNames = allItems
+          .filter(i => i.type === 'skills')
+          .map(i => `  - ${i.name} (from: ${i.sourcePath})`)
+          .join('\n');
+        log.error(`Skill not found at path: ${options.skill}`);
+        if (skillNames) {
+          console.log('');
+          console.log('Available skills with changes:');
+          console.log(skillNames);
+        }
+        process.exit(1);
+      }
+    }
+
+    // Replace allItems with just this one skill
+    allItems.length = 0;
+    allItems.push(matchedItem);
+  }
+
   if (allItems.length === 0) {
     log.info('No new or modified resources to push');
     return;

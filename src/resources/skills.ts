@@ -148,6 +148,40 @@ function getSkillDestination(localConfig: LocalConfig, skillName: string, namesp
   return path.join(localConfig.repo.localPath, 'skills', skillName);
 }
 
+
+/**
+ * Recursively scan a directory tree to find all subdirectories containing SKILL.md.
+ * Returns a map of skill names to their full paths, supporting arbitrary nesting depth.
+ * For example, if scanning ~/.claude/skills/, will find both:
+ *   - top-level-skill/ → {"top-level-skill": "~/.claude/skills/top-level-skill"}
+ *   - hai/my-skill/ → {"my-skill": "~/.claude/skills/hai/my-skill"}
+ *   - nested/category/other-skill/ → {"other-skill": "~/.claude/skills/nested/category/other-skill"}
+ */
+async function scanSkillsRecursively(dirPath: string): Promise<Map<string, string>> {
+  const results = new Map<string, string>();
+  
+  async function walk(currentPath: string): Promise<void> {
+    if (!await pathExists(currentPath)) return;
+    
+    const entries = await listDirs(currentPath);
+    for (const entry of entries) {
+      const entryPath = path.join(currentPath, entry);
+      const skillMdPath = path.join(entryPath, SKILL_MD);
+      
+      if (await pathExists(skillMdPath)) {
+        // This directory is a skill
+        results.set(entry, entryPath);
+      } else {
+        // Recursively scan subdirectories
+        await walk(entryPath);
+      }
+    }
+  }
+  
+  await walk(dirPath);
+  return results;
+}
+
 export class SkillsHandler extends ResourceHandler {
   readonly type = 'skills' as const;
 
@@ -249,18 +283,15 @@ export class SkillsHandler extends ResourceHandler {
       const skillsDir = path.join(resolveBaseDir(localConfig), toolPath.skills);
       if (!await pathExists(skillsDir)) continue;
 
-      const dirs = await listDirs(skillsDir);
-      for (const dir of dirs) {
+      // Use recursive scanning to find all skills at any depth
+      const localSkills = await scanSkillsRecursively(skillsDir);
+      
+      for (const [dir, localDirPath] of localSkills) {
         if (tombstones.has(dir)) continue;
         if (pushIgnoredSkills.has(dir)) continue;
         if (blockedSkills.has(dir)) continue; // Skip skills in non-allowed namespaces
         if (BUILTIN_SKILL_NAMES.has(dir)) continue; // Skip CLI built-in skills
         if (sourceSkillNames.has(dir)) continue; // Skip cross-team source skills
-        // Check for SKILL.md to confirm it's a valid skill
-        const skillMd = path.join(skillsDir, dir, 'SKILL.md');
-        if (!await pathExists(skillMd)) continue;
-
-        const localDirPath = path.join(skillsDir, dir);
 
         if (teamSkills.has(dir)) {
           // Skill exists in team repo — check if content differs

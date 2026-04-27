@@ -203,6 +203,12 @@ export interface GlobalOptions {
   silent?: boolean;
   /** Force full sync even when repo HEAD matches lastPullRev. */
   force?: boolean;
+  /** Push a specific skill by path. */
+  skill?: string;
+  /** Target role namespace (overrides detected namespace). */
+  role?: string;
+  /** Push all detected skills without prompting. */
+  all?: boolean;
 }
 
 // ─── Constants ──────────────────────────────────────────
