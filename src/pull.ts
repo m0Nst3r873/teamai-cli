@@ -19,6 +19,7 @@ import {
   TEAMAI_CLAUDEMD_END,
   CultureFrontmatterSchema,
   resolveBaseDir,
+  isWikiEnabled,
   getTeamaiHome,
 } from './types.js';
 import type { CultureFrontmatter } from './types.js';
@@ -78,6 +79,29 @@ async function buildRolePullContext(localConfig: LocalConfig): Promise<RolePullC
   }
 
   return { activeNamespaces, activeSkillNames, inactiveSkillNames };
+}
+
+/**
+ * Filter rules by the user's active knowledge namespaces.
+ *
+ * Rules whose name starts with a namespace path (e.g. "common/coding-style")
+ * are filtered: only those in activeKnowledgeNamespaces pass through.
+ * Root-level rules (no "/" in name) are always included.
+ *
+ * When knowledgeNamespaces is null (no role configured), all rules pass through.
+ */
+export function filterRulesByKnowledgeNamespaces(
+  rules: ResourceItem[],
+  knowledgeNamespaces: string[] | null,
+): ResourceItem[] {
+  if (!knowledgeNamespaces) return rules;
+
+  return rules.filter((rule) => {
+    const slashIndex = rule.name.indexOf('/');
+    if (slashIndex === -1) return true; // root-level rule, always include
+    const namespace = rule.name.slice(0, slashIndex);
+    return knowledgeNamespaces.includes(namespace);
+  });
 }
 
 export async function scanRoleAwareSkills(localConfig: LocalConfig, namespaces: ResourceNamespaces): Promise<ResourceItem[]> {
@@ -260,7 +284,10 @@ async function pullForScope(
   const subscribedTags = localConfig.subscribedTags;
 
   // Step 2: Sync each resource type
-  const resourceTypes: ResourceType[] = ['skills', 'rules', 'docs', 'env', 'wiki'];
+  const wikiEnabled = isWikiEnabled();
+  const resourceTypes: ResourceType[] = wikiEnabled
+    ? ['skills', 'rules', 'docs', 'env', 'wiki']
+    : ['skills', 'rules', 'docs', 'env'];
   let totalSynced = 0;
   let desiredSkillNames: Set<string> | null = null;
   let knownRepoSkillNames: Set<string> | null = null;
@@ -271,7 +298,10 @@ async function pullForScope(
     if (type === 'rules') {
       const rulesHandler = handler as RulesHandler;
       const allItems = await rulesHandler.scanTeamForPull(freshConfig, localConfig);
-      const { included: items, skipped } = filterByTags(allItems, tagsConfig, subscribedTags, 'rules');
+      // Filter by role knowledge namespaces first, then by tags
+      const knowledgeNs = roleContext ? roleContext.activeNamespaces.knowledge : null;
+      const roleFiltered = filterRulesByKnowledgeNamespaces(allItems, knowledgeNs);
+      const { included: items, skipped } = filterByTags(roleFiltered, tagsConfig, subscribedTags, 'rules');
       if (items.length > 0) {
         if (options.dryRun) {
           log.info(`[${scopeLabel}] [dry-run] Would sync ${items.length} rule(s)${skipped.length > 0 ? ` (skipped ${skipped.length} by tags)` : ''}`);
@@ -391,11 +421,10 @@ async function pullForScope(
     const tombstoneTypes: {
       type: ResourceType;
       ext?: string;
-      toolPathField: 'rules' | 'skills' | 'wiki';
+      toolPathField: 'rules' | 'skills';
     }[] = [
       { type: 'rules', ext: '.md', toolPathField: 'rules' },
       { type: 'skills', toolPathField: 'skills' },
-      { type: 'wiki', ext: '.md', toolPathField: 'wiki' },
     ];
 
     const baseDir = resolveBaseDir(localConfig);
@@ -417,6 +446,25 @@ async function pullForScope(
           }
         }
       }
+    }
+
+    // Wiki tombstone cleanup: wiki is now in shared location, not per-tool
+    try {
+      const wikiHandler = getHandler('wiki');
+      const wikiTombstones = await wikiHandler.readTombstones(localConfig);
+      if (wikiTombstones.size > 0) {
+        const teamaiHome = getTeamaiHome(localConfig.scope, localConfig.projectRoot);
+        const wikiDir = path.join(teamaiHome, 'wiki');
+        for (const name of wikiTombstones) {
+          const wikiPath = path.join(wikiDir, `${name}.md`);
+          if (await pathExists(wikiPath)) {
+            await remove(wikiPath);
+            log.debug(`[${scopeLabel}] Cleaned up tombstoned wiki ${name} from shared wiki`);
+          }
+        }
+      }
+    } catch (e) {
+      log.debug(`[${scopeLabel}] Wiki tombstone cleanup skipped: ${(e as Error).message}`);
     }
 
     if (roleContext) {
@@ -555,7 +603,7 @@ async function pullForScope(
   if (!options.dryRun) {
     try {
       const { deployBuiltinSkills } = await import('./builtin-skills.js');
-      const deployed = await deployBuiltinSkills(freshConfig, localConfig);
+      const deployed = await deployBuiltinSkills(freshConfig, localConfig, { skipWiki: !wikiEnabled });
       if (deployed > 0) {
         log.debug(`[${scopeLabel}] Deployed ${deployed} built-in skill(s)`);
       }
