@@ -30,6 +30,7 @@ flowchart LR
         c2["contribute-check 触发提示\n知识库空白时引导贡献"]
         c3["质量自动更新 / teamai import\n低质量淘汰，历史文档迁移入库"]
         c4["codebase MR 自动检查\n提 MR 后感知接口与调用变更"]
+        c5["learning 晋升机制\n高置信度条目按内容类别\n沉淀为 docs / skills / rules"]
     end
 
     A -->|"采用/忽略信号\n反映知识实际价值"| B
@@ -52,7 +53,7 @@ flowchart LR
 | **6/19** | 完成 Phase 0：冷启动（与 Phase 2 并行交付）| `teamai import` 可用；新团队一条命令完成知识库迁移与 `codebase.md` 初始化，配合软上线开箱即有非空知识库 |
 | **6/19** | 完成 Phase 2：Contribute-check 优化 + **MVP 上线** | Contribute-check 感知知识库空白；**向业务团队开放试用**，团队成员 `teamai pull` 后即可使用检索功能，开始积累真实 votes 数据 |
 | **6/26** | 完成 Phase 3：Vote 双计数器 | recalled_count / upvoted_count 双轨计数，Stop hook 近实时推送 votes 到团队仓库 |
-| **7/3** | 完成 Phase 4 主链：自动维护系统 | confidence 写入 learnings frontmatter（基于 2 周真实数据）；hot/cold 分流；maintenance 清理命令；codebase 文档命令 |
+| **7/3** | 完成 Phase 4 主链：自动维护系统 | confidence 写入 learnings frontmatter（基于 2 周真实数据）；hot/cold 分流；maintenance 清理命令；codebase 文档命令；**learning 晋升机制** |
 | **7/10** | 完成 Phase 4 完整：P4.5 质量自动更新 | docs/rules/skills 质量更新机制完整可用 |
 | **7/17** | v1.0 正式发布 | 全链路集成测试通过，P1 级 bug 清零，正式交付团队日常使用 |
 
@@ -69,6 +70,7 @@ flowchart LR
 - P0.2：AI 分类提炼（生成 rules / docs / learnings 草稿，含去重检测）
 - P0.3：codebase.md 初始化（git 仓库扫描 + 架构文档语义提取，合并进 import 流程）
 - P0.4：交互确认 + 批量推送到 team repo
+- <span style="color:#0969da">P0.5：MR 历史提炼（扫描近期 merged MR → AI 提炼 learning 草稿 + codebase.md 变更建议 → 并入 P0.4 确认流程；dedup 检测与 session learning 的重叠）</span>
 
 ### Phase 1：检索 Subagent（6/5–6/12）
 
@@ -79,6 +81,7 @@ flowchart LR
 - P1.1：新建 teamai-recall 检索 subagent（覆盖 skills + learnings）
 - P1.2：CLAUDE.md 注入检索触发规则 + TodoWrite hook 兜底
 - P1.3：搜索范围扩展至 docs/rules（四类知识库全覆盖）
+- <span style="color:#0969da">P1.4：Domain 推断 + 检索加权（tags/路径/类型推断内容域；technical × 1.0、ops × 0.5、support × 0.3；skills/rules 类型额外 × 1.1）</span>
 
 ### Phase 2：Contribute-check 优化（6/12–6/19）
 
@@ -89,7 +92,7 @@ flowchart LR
 - P2.2：contribute-check 新增知识库空白维度
 - P2.3：优化贡献提示文案
 
-> 🚀 **软上线节点**：Phase 2 验收通过后（6/19），即可向业务团队开放使用。四类知识库检索完整，触发机制就位，团队成员执行 `teamai pull` 后自动生效。Week 3–4 积累的真实 votes 数据将驱动 Phase 4 的 confidence 计算，避免冷启动。
+> 🚀 **软上线节点**：Phase 2 验收通过后（6/19），即可向业务团队开放使用。四类知识库检索完整，触发机制就位，团队成员执行 `teamai pull` 后自动生效。Week 3–4 积累的真实 votes 数据将驱动 Phase 4 的 confidence 计算，避免冷启动。：Phase 2 验收通过后（6/19），即可向业务团队开放使用。四类知识库检索完整，触发机制就位，团队成员执行 `teamai pull` 后自动生效。Week 3–4 积累的真实 votes 数据将驱动 Phase 4 的 confidence 计算，避免冷启动。
 
 ### Phase 3：Vote 双计数器（6/19–6/26）
 
@@ -103,14 +106,15 @@ flowchart LR
 
 ### Phase 4：自动维护系统（6/26–7/10）
 
-> **太长不看**：基于 Phase 3 积累的双计数器数据，本阶段实现知识库的全生命周期自动管理。核心是为每条 learning 引入 **置信度（confidence）**：根据团队整体的召回/采用行为动态计算，直接写入 .md 文件 frontmatter，全团队共享同一份置信度视图。在此基础上：低置信度 learnings 由 `teamai maintenance` 命令扫描候选后人工确认删除；docs/rules/skills 不删除，改为本地 hot/cold 路径分流，检索时优先命中活跃知识；当某条 doc/rule/skill 被反复召回但不被采用（"召回但忽略"率超阈值），结合用户实际采用的 learnings 作为输入，由 agent 生成更新草稿，人工确认后推送；此外新增 `teamai docs codebase` 命令维护团队 codebase 梳理文档，供检索 subagent 在每次任务开始时提供仓库上下文。
+> **太长不看**：基于 Phase 3 积累的双计数器数据，本阶段实现知识库的全生命周期自动管理。核心是为每条 learning 引入 **置信度（confidence）**：根据团队整体的召回/采用行为动态计算，直接写入 .md 文件 frontmatter，全团队共享同一份置信度视图。在此基础上：低置信度 learnings 由 `teamai maintenance` 命令扫描候选后人工确认删除；docs/rules/skills 不删除，改为本地 hot/cold 路径分流，检索时优先命中活跃知识；当某条 doc/rule/skill 被反复召回但不被采用（"召回但忽略"率超阈值），结合用户实际采用的 learnings 作为输入，由 agent 生成更新草稿，人工确认后推送；**当某条 learning 置信度持续积累到高阈值时（不区分来源与 domain），系统提示将其按内容类别晋升为 docs / skills / rules，实现经验知识向规范知识的正式沉淀**；此外新增 `teamai docs codebase` 命令维护团队 codebase 梳理文档，供检索 subagent 在每次任务开始时提供仓库上下文。
 
 **包含步骤**：
 - P4.1：置信度（confidence）写入 learnings frontmatter，基于团队真实 votes 数据
 - P4.2：learnings 低置信度候选清理命令 `teamai maintenance --prune`
 - P4.3：docs/rules/skills 本地 hot/cold 路径分流，优先检索活跃知识
-- P4.4：codebase 梳理文档 + `teamai docs codebase` 维护命令 + MR 触发自动检查（可随时并行）
+- <span style="color:#0969da">P4.4：MR 合入统一处理流水线（一次解析 diff + MR description + commit message，双路输出：① learning 草稿提炼 + dedup；② codebase.md 变更建议，含架构决策 why；触发时机统一改为 MR merged）</span>
 - P4.5：docs/rules/skills 质量自动更新机制（依赖真实数据，第 5 周实现）
+- P4.6：learning 晋升机制（confidence 达阈值后按内容类别提示晋升为 docs / skills / rules）
 
 ---
 
@@ -222,10 +226,12 @@ flowchart TD
     P01["P0.2\nAI 提炼分类\nrules/docs/learnings 草稿"]
     P02["P0.3\ncodebase.md 初始化\ngit 扫描 + 架构文档提取"]
     P03["P0.4\n交互确认\n批量推送到 team repo"]
+    P04["P0.5\nMR 历史提炼\nlearning 草稿 + codebase 建议"]
     P10["P1.0\nteamai-cli 支持\nagents 同步"]
     P11["P1.1\n检索 subagent MVP\n（skills + learnings）"]
     P12["P1.2\n触发机制\n（规则注入 + hook）"]
     P13["P1.3\n搜索范围扩展\n（docs/rules，完成四类覆盖）"]
+    P14["P1.4\nDomain 推断\n+ 检索加权"]
     P21["P2.1\n搜索质量分\n记录检索效果"]
     P22["P2.2\ncontribute-check\n新增知识库缺失维度"]
     P23["P2.3\n提示文案优化\n（引导贡献）"]
@@ -236,17 +242,20 @@ flowchart TD
     P41["P4.1\n置信度计算\nlearnings frontmatter"]
     P42["P4.2\nlearnings 清理\n+ maintenance 命令"]
     P43["P4.3\ndocs/rules/skills\nhot/cold 本地分流"]
-    P44["P4.4\ncodebase 文档维护\n+ MR 自动检查"]
+    P44["P4.4\nMR 合入统一流水线\nlearning 提炼 + codebase 更新"]
     P45["P4.5\ndocs/rules/skills\n质量自动更新"]
+    P46["P4.6\nlearning 晋升机制\n高置信度 → docs/skills/rules"]
 
     P00 --> P01
     P00 --> P02
     P01 --> P03
     P02 --> P03
+    P04 --> P03
     P10 --> P11
     P11 --> P12
     P11 --> P13
-    P11 --> P21
+    P13 --> P14
+    P14 --> P21
     P11 --> P32
     P21 --> P22
     P22 --> P23
@@ -261,18 +270,23 @@ flowchart TD
     P13 --> P45
     P33 --> P45
     P41 --> P45
+    P41 --> P46
+    P43 --> P46
 
     P00:::phase0
     P01:::phase0
     P02:::phase0
     P03:::phase0
-    P44:::independent
+    P04:::new
+    P14:::new
+    P44:::new
 
-    classDef independent fill:#f5f5dc,stroke:#aaa
+    classDef new fill:#dbeafe,stroke:#0969da,color:#0969da
     classDef phase0 fill:#e8f4f8,stroke:#4a9eca
 ```
 
-> **P4.4（codebase 梳理文档）** 不依赖任何其他步骤，可在任意阶段并行启动。
+> **P4.4（MR 合入统一流水线）** 不依赖其他步骤，可在任意阶段并行启动。
+> **P0.5（MR 历史提炼）** 与 P0.1–P0.3 并行，最终汇入 P0.4 确认流程。
 > **P1.1** 是最小可用版本，完成后即可体验检索 subagent 核心价值。
 
 ---
@@ -385,6 +399,41 @@ teamai import [OPTIONS]
 
 ---
 
+<span style="color:#0969da">
+
+#### P0.5　MR 历史提炼
+
+**背景**：Merged MR 是团队确认有效的解法，天然携带三层高质量信息：commit message（做了什么/为什么）、MR description（背景、方案对比、权衡）、code diff（具体修改模式）。这三层加在一起本质上是一篇已被 code review 验证的 learning，但当前飞轮系统完全没有索引到它。Phase 0 冷启动阶段可以批量扫描历史 MR，快速填充初始知识库；Phase 4 后每次 MR 合入都是自动产生 learning 的持续入口（由 P4.4 负责）。
+
+**命令设计**：
+
+```
+teamai import --from-mr <repo-url> [--since <date>] [--limit N]
+```
+
+**核心功能**：
+
+- 通过 git 工具（gh / gf-cli）拉取指定仓库近期 merged MR 列表
+- 对每个 MR 解析：commit message + MR description + diff 文件列表
+- 调用 AI 提炼结构化 learning 草稿，自动填充 frontmatter：
+  - `title`：从 MR 标题提炼
+  - `tags`：从 diff 路径 + commit 关键词推断
+  - `domain: technical`：MR 来的内容可直接置信
+  - `confidence: 0.85`：初始置信度高于手写 learning（0.70），因为已经过 code review
+  - `source_mr`：记录来源 MR 链接，便于溯源
+- **dedup 检测**：与近 14 天内的 session learnings 做重合度检测（≥ 60% 则标记关联）：
+  - session learning 标记 `superseded_by: <MR-learning-id>`
+  - MR learning 补充 session learning 中的"过程细节"
+  - session learning 的 recalled/upvoted 计数迁移到 MR learning
+- 同时输出 codebase.md 变更建议（与 P4.4 共享同一解析流水线）
+- 所有草稿并入 P0.4 交互确认流程，用户逐条 [接受] [编辑] [跳过]
+
+**验收**：`teamai import --from-mr <repo-url> --limit 10` 输出 learning 草稿列表；与现有 session learnings 重叠的条目标注 `superseded`；confidence 字段为 0.85；codebase.md 变更建议与 learning 草稿一起进入确认流程。
+
+</span>
+
+---
+
 ### Phase 1：检索 Subagent
 
 > **太长不看**：当前 agent 不会主动检索知识库，且检索结果直接注入主对话上下文，随知识库增大持续膨胀。本阶段新建以 **subagent 形式运行**的检索 agent（`teamai-recall`），主对话通过 Agent tool 调用它，检索过程在独立上下文中完成，结果以精简摘要返回——主对话上下文不受影响。
@@ -452,7 +501,57 @@ teamai import [OPTIONS]
 
 ---
 
-### Phase 2：Contribute-check 优化
+<span style="color:#0969da">
+
+#### P1.4　Domain 推断 + 检索加权
+
+**背景**：四个知识库类型（KnowledgeType）是组织形式，不是内容价值的判断依据。`learnings` 里既有"deep_gemm NameError 调试"（技术代码），也有"HAI 集群滚动升级 SOP"（运维操作）；`docs` 里既有架构决策文档（技术），也有测试环境连接信息（运维）。真正的优先级信号是内容域（domain）。`skills` / `rules` 的类型本身已是可信信号；`learnings` / `docs` 需要通过 tags 细分。
+
+**Domain 分类**：
+
+| domain | 含义 | 典型内容 |
+|--------|------|---------|
+| `technical` | 技术代码相关 | 代码调试、框架踩坑、API 设计、架构决策 |
+| `ops` | 运维部署相关 | 部署 SOP、集群操作、监控告警、故障恢复 |
+| `support` | 用户支持相关 | 用户反馈处理、FAQ、产品使用指南 |
+| `neutral` | 无法推断 | 无 tags 且路径无特征的文档 |
+
+**推断优先级（从高到低）**：
+
+1. frontmatter 显式声明 `domain: technical`（覆盖所有自动推断）
+2. tags 关键词匹配（主要推断来源，基于团队真实 learnings tags 样本构建）
+3. 目录路径匹配（`learnings/ops/`、`docs/architecture/` 等）
+4. 类型兜底：`skills` / `rules` → `technical`；`docs` / `learnings` 无命中 → `neutral`
+
+**评分权重**：在现有 title/tag/body/vote 评分基础上乘以 domain 系数：
+
+```
+technical  × 1.0（基准）
+neutral    × 0.85（轻微降权，保守处理未分类内容）
+ops        × 0.5（明确运维 SOP，降权）
+support    × 0.3（用户支持类，大幅降权）
+
+skills / rules 类型额外 × 1.1（类型本身已是可信信号）
+```
+
+**数据模型变更**：
+- `types.ts` 新增 `KnowledgeDomain` 类型；`SearchIndexEntry` 加可选 `domain?` 字段；`SEARCH_INDEX_VERSION` 2 → 3
+- 旧索引 `domain` 字段缺失时降级为 `neutral`，不报错；下次 `teamai pull` 自动重建索引
+
+**与其他步骤的关系**：
+- **P2.1（搜索质量分）**：domain 加权之后记录的质量分基线更高，结果更有意义
+- **P4.1（置信度）**：可扩展将 domain 纳入衰减系数（technical 衰减半衰期 90 天，ops 30 天，support 14 天）
+- **P4.3（hot/cold）**：两者正交互补，hot/cold 解决时间维度活跃度，domain 解决内容域价值
+
+**验收**：
+1. `teamai recall "API timeout"` 返回结果中，technical 类条目分数高于同原始分的 ops 类条目
+2. `teamai recall "k8s 滚动升级"` 仍能返回 ops 类条目（不被完全排除）
+3. frontmatter 显式 `domain: technical` 能覆盖 tags 推断的 `ops` 结果
+4. 索引版本升到 3，`isLegacyIndex()` 对旧 v2 索引返回 true，触发重建
+
+</span>
+
+---
 
 > **太长不看**：当前 contribute-check 只根据 session 工具调用量判断是否值得贡献经验，无法感知知识库是否已覆盖任务。本阶段新增知识库空白检测维度，触发更强的贡献提示。
 
@@ -469,8 +568,9 @@ teamai import [OPTIONS]
 **核心功能**：
 - 在现有评分机制基础上，新增知识库覆盖度维度
 - 若检索均未命中，判定为"知识库空白"，加分触发更强提示
+- <span style="color:#0969da">**新增 git commit 检测维度**：检测本次 session 是否已产生 git commit 操作。若有 commit，说明该工作将有对应 MR，MR learning（P0.5 / P4.4）将是更高质量的知识来源，相应降低 contribute-check 的触发权重，避免与 MR 提炼产生低质量重复。触发逻辑：有 git commit 且知识库有命中 → 降权触发；无 git commit 或知识库无命中 → 正常触发。</span>
 
-**验收**：session 内 recall 均未命中时提示率提升；recall 命中良好时不误触发。
+**验收**：session 内 recall 均未命中时提示率提升；recall 命中良好时不误触发；<span style="color:#0969da">session 内有 git commit 时触发权重降低，减少与 MR learning 的重叠。</span>
 
 ---
 
@@ -584,28 +684,39 @@ teamai import [OPTIONS]
 
 ---
 
-#### P4.4　codebase 梳理文档维护 + MR 触发自动检查
+<span style="color:#0969da">
 
-**背景**：`codebase.md` 需要持续维护，当代码有接口/调用关系变更时应自动检查并提示更新。
+#### P4.4　MR 合入统一处理流水线
+
+**背景**：P0.5 完成冷启动阶段的历史 MR 批量提炼；P4.4 是其持续运行版本，在每次 MR 合入后自动触发。原设计（"MR 提交后检测结构变更，更新 codebase.md"）有三个缺陷：① 只用了 diff，丢掉了 MR description 中的"为什么"；② 触发时机是 MR 提交而非 MR 合入，未经 review 的变更不应更新知识库；③ learning 提炼与 codebase 更新是两个孤立流程，共享同一输入却各自解析，可能产生内容矛盾。本步骤将两条输出合并为一个流水线。
+
+**触发时机**：MR **merged**（而非提交），与 P0.5 保持一致。
 
 **核心功能**：
 
-- **手动维护命令**：
-  - `teamai docs codebase add` → 添加仓库条目
-  - `teamai docs codebase scan` → 扫描本地 git 仓库，自动检测未登记条目
+一次解析 `commit message + MR description + diff`，双路输出：
 
-- **MR 触发自动检查**：当提交 MR 后，系统自动分析 diff：
-  - 检测接口变更 → 建议更新"仓库清单"中的接口说明
-  - 检测跨仓库调用新增 → 建议更新"调用关系"块
-  - 检测服务/模块边界变化 → 建议更新"业务边界"块
-  - 纯内部实现变更 → 无需更新
+**输出 A：learning 草稿提炼**
+- 与 P0.5 共享同一提炼逻辑（问题背景 + 解法 + 关键代码片段）
+- 自动填充 frontmatter（`domain: technical`、`confidence: 0.85`、`source_mr`）
+- dedup 检测：与近 14 天 session learnings 检查重合度，写入 `superseded_by` 关联
+- superseded 的 session learning 在下次 `teamai pull` 时进入 `cold/`，不参与主检索
 
-- 对应提示用户确认后写入并推送（若用户拒绝则不修改）
+**输出 B：codebase.md 变更建议**
+- 有新服务/模块引入 → 补充服务描述和调用关系（从 MR description 提取语义，不只靠 diff）
+- 有接口变更 → 更新接口说明（what）
+- 有架构决策（从 MR description 提取）→ 更新架构决策记录（why）
+- 纯内部实现变更 → 无需更新 codebase.md
+
+**命令**：`teamai docs codebase add/scan` 仍保留手动维护入口。
 
 **验收**：
-- 手动命令可正常执行，team repo 更新
-- 提交含接口变更的 MR，系统输出对应更新草稿
-- 提交纯内部变更的 MR，输出"无需更新"
+- MR merged 后，系统输出 learning 草稿 + codebase.md 变更建议（若有结构变更）
+- 与 14 天内 session learning 重叠的条目正确写入 `superseded_by`
+- 纯内部变更的 MR 输出"codebase.md 无需更新"
+- learning 草稿中的架构背景与 codebase.md 建议内容不矛盾（同源一次解析）
+
+</span>
 
 ---
 
@@ -620,7 +731,7 @@ teamai import [OPTIONS]
   - 来自 ≥ 2 名不同用户（防单用户误操作）
   - 距上次更新 ≥ 30 天（冷却机制）
 
-- **更新内容来源**：追踪当该条目被忽略时，用户实际采用的其他 learning 条目，作为内容更新参考
+- **更新内容来源**：追踪当该条目被忽略时，用户实际采用的其他 learning 条目以及对应的被召回但未upvote的session所生成learnings，作为内容更新参考
 
 - **执行流程**：
   - `teamai maintenance docs/rules/skills --update-quality` 输出候选列表及关联 learnings
@@ -628,6 +739,39 @@ teamai import [OPTIONS]
   - 用户二次确认后，写入并推送到 team repo
 
 **验收**：某条规则被 5 次"召回但忽略"后，该命令输出该条目及关联 learnings 列表；确认后 agent 生成可读的更新草稿。
+
+---
+
+#### P4.6　learning 晋升机制
+
+**背景**：learnings 是经验型知识，生命周期是"产生 → 积累置信度 → 稳定"。当某条 learning 被团队反复召回并采用，置信度持续积累到高水位，说明它已超越个人经验，成为团队共识——此时应当脱离 learnings 形态，按内容类别正式沉淀为 docs / skills / rules，进入更稳定、更具规范性的知识层。晋升不区分 learning 的来源（contribute-check 贡献或 MR 提炼均可）与内容域（technical / ops / support 均适用）。
+
+**晋升触发条件**（满足全部）：
+- `confidence ≥ 0.90`
+- `upvoted_count ≥ 5`（至少 5 次被主对话实际采用）
+- 来自 ≥ 2 名不同团队成员（确保不是个人强烈偏好）
+- 距创建时间 ≥ 14 天（排除新鲜感驱动的短期高分）
+
+**晋升目标类别**（由 AI 根据内容判断，用户可覆盖）：
+
+| learning 内容特征 | 建议晋升目标 |
+|-----------------|------------|
+| 可直接复用的操作步骤、工具命令、SOP | `skills` |
+| 团队应遵守的规范、约束、最佳实践 | `rules` |
+| 架构决策、系统说明、背景文档 | `docs` |
+
+**执行流程**：
+1. `teamai pull` 时扫描，若发现达到晋升条件的 learning，输出提示：
+   ```
+   ✨ 1 条 learning 置信度达到晋升阈值，建议沉淀为正式知识：
+      [learning] api-timeout-retry → 建议晋升为 skills（可直接复用的操作步骤）
+      运行 `teamai promote <id>` 查看详情并确认
+   ```
+2. `teamai promote <learning-id>` 展示 learning 内容 + AI 生成的目标格式草稿，用户选择晋升类别并确认
+3. 系统将草稿写入对应目录（skills / rules / docs），并在原 learning 中写入 `promoted_to` 字段；原 learning 在下次 pull 后进入 `cold/`，不再参与主检索（但保留历史溯源）
+4. 推送到 team repo，单次 commit
+
+**验收**：某条 learning 满足晋升条件后，`teamai pull` 输出晋升提示；`teamai promote` 命令展示草稿并完成晋升；原 learning 标记 `promoted_to`，下次 pull 后进入 cold/；team repo 对应目录出现新条目。
 
 ---
 
@@ -639,12 +783,14 @@ teamai import [OPTIONS]
 | P0.2 | AI 分类提炼 | P0.1 |
 | P0.3 | codebase.md 初始化 | P0.1 |
 | P0.4 | 交互确认 + 批量推送 | P0.2、P0.3 |
+| <span style="color:#0969da">P0.5</span> | <span style="color:#0969da">MR 历史提炼（learning 草稿 + codebase 建议 + dedup）</span> | <span style="color:#0969da">P0.2（复用 AI 提炼逻辑）→ P0.4（汇入确认流程）</span> |
 | P1.0 | 支持 agents 同步 | — |
 | P1.1 | 检索 subagent 可用 | P1.0 |
 | P1.2 | 任务前自动触发检索 | P1.1 |
 | P1.3 | 扩展至 docs/rules，完成四类覆盖 | P1.1 |
-| P2.1 | 搜索质量分记录 | P1.1 |
-| P2.2 | 感知知识库空白 | P2.1 |
+| <span style="color:#0969da">P1.4</span> | <span style="color:#0969da">Domain 推断 + 检索加权（technical/ops/support/neutral）</span> | <span style="color:#0969da">P1.3</span> |
+| P2.1 | 搜索质量分记录 | <span style="color:#0969da">P1.4</span>（原 P1.1） |
+| P2.2 | 感知知识库空白 <span style="color:#0969da">+ git commit 检测降权</span> | P2.1 |
 | P2.3 | 优化提示文案 | P2.2 |
 | P3.1 | votes 双计数器 schema | — |
 | P3.2 | 双轨反馈机制 | P3.1、P1.1 |
@@ -652,9 +798,10 @@ teamai import [OPTIONS]
 | P3.4 | Stop hook 实时推送 | P3.3 |
 | P4.1 | 置信度计算与写入 | P3.4 |
 | P4.2 | learnings 清理机制 | P4.1 |
-| P4.3 | hot/cold 本地分流 | P1.3、P3.2、P4.1 |
-| P4.4 | codebase 文档维护 + MR 检查 | —（随时可做）|
+| P4.3 | hot/cold 本地分流 <span style="color:#0969da">（superseded 条目直接进 cold/）</span> | P1.3、P3.2、P4.1 |
+| <span style="color:#0969da">P4.4</span> | <span style="color:#0969da">MR 合入统一流水线（learning 提炼 + codebase 更新，触发时机改为 merged）</span> | <span style="color:#0969da">—（随时可并行；复用 P0.5 解析逻辑）</span> |
 | P4.5 | docs/rules/skills 质量自动更新 | P1.3、P3.3、P4.1 |
+| P4.6 | learning 晋升机制（confidence 达阈值 → 按内容类别沉淀为 docs / skills / rules） | P4.1、P4.3（晋升后原 learning 进 cold/） |
 
 ---
 
@@ -677,6 +824,7 @@ teamai import [OPTIONS]
 | P1.1 | 高 | 3.0 | 1.0 | Agent prompt 调试为迭代性工作，首版难一次达标 |
 | P1.2 | 低–中 | 1.0 | 0.5 | 规则措辞需反复确认 |
 | P1.3 | 低 | 1.0 | 0.5 | |
+| <span style="color:#0969da">P1.4</span> | <span style="color:#0969da">低–中</span> | <span style="color:#0969da">1.5</span> | <span style="color:#0969da">0.5</span> | <span style="color:#0969da">tags 关键词表初版覆盖不全，需上线后迭代校准</span> |
 | P2.1 | 低 | 0.5 | 0.5 | |
 | P2.2 | 低–中 | 1.0 | 0.5 | 触发阈值需真实数据校准 |
 | P2.3 | 低 | 0.5 | — | 纯文案改动 |
@@ -687,9 +835,11 @@ teamai import [OPTIONS]
 | P4.1 | 高 | 3.0 | 1.0 | 公式参数初版为估算值，上线后校准 |
 | P4.2 | 中 | 2.0 | 0.5 | |
 | P4.3 | 低–中 | 1.5 | 0.5 | |
-| P4.4 | 中 | 2.0 | 0.5 | 独立分支，可随时并行 |
+| <span style="color:#0969da">P4.4（升级版）</span> | <span style="color:#0969da">高</span> | <span style="color:#0969da">3.0</span> | <span style="color:#0969da">1.0</span> | <span style="color:#0969da">MR description 解析质量依赖 AI，双路输出一致性验证；dedup 阈值需调校</span> |
 | P4.5 | 高 | 3.0 | 1.0 | 依赖链最长 |
-| **合计** | | **27.0 天** | **9.5 天** | 共约 36.5 人天，25–30 工作日可完成 |
+| P4.6 | 中 | 1.5 | 0.5 | AI 分类建议准确率需调校；晋升 cold/ 与 P4.3 集成 |
+| <span style="color:#0969da">P0.5</span> | <span style="color:#0969da">中</span> | <span style="color:#0969da">2.0</span> | <span style="color:#0969da">0.5</span> | <span style="color:#0969da">复用 P0.2 AI 提炼逻辑；主要风险在 MR API 对接（gh / gf-cli 差异）</span> |
+| **合计** | | **33.5 天** | **11.5 天** | 共约 45 人天，较前版增加约 2 天 |
 
 > **工作量说明**：编码与单测并行推进。第 6 周 5 天全部用于集成自测与 bug 修复，不排新功能。
 
