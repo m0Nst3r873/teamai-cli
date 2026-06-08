@@ -12,7 +12,7 @@
 |------|------|------|
 | P1.0 支持 agents 目录同步 | ✅ 通过 | |
 | P1.1 检索 subagent MVP | ✅ 通过 | |
-| P1.2 触发机制注入 | ⚠️ 部分通过 | E2E 环境下规则注入测试有 2 个失败，为已知预存 bug，功能本身可用 |
+| P1.2 触发机制注入 | ✅ 通过 | |
 | P1.3 搜索范围扩展至四类 | ✅ 通过 | |
 | P1.4 Domain 推断 + 检索加权 | ✅ 通过 | 本次新增实现 |
 
@@ -49,12 +49,10 @@
 
 | 验收项 | 结果 | 依据 |
 |--------|------|------|
-| CLAUDE.md 注入 `[teamai:recall-rules:start/end]` 块，含调用 teamai-recall 规则 | ⚠️ 部分 | 单元 `recall-rules.test.ts` 6 tests ✓；E2E `phase1-e2e.test.ts` test-2 ×（已知预存 bug：E2E 环境 recall-rules 注入时机问题，不影响生产可用性） |
+| CLAUDE.md 注入 `[teamai:recall-rules:start/end]` 块，含调用 teamai-recall 规则 | ✅ | 单元 `recall-rules.test.ts` 6 tests ✓；E2E `phase1-e2e.test.ts` test-2 ✓（已修复） |
 | 规则块幂等：重复 `pull` 不会重复注入 | ✅ | `phase1-e2e.test.ts` test-5（idempotency）✓ |
 | 仅 Tier-1 工具（有 claudemd + agents 路径）收到规则注入 | ✅ | `auto-recall.test.ts` 63 tests pass（4 skipped） |
 | TodoWrite 操作后触发检索提示 | ✅ | `todowrite-hint.test.ts` 10 tests pass |
-
-> **E2E 失败说明**：`phase1-e2e.test.ts` test-2（CLAUDE.md 注入）和 test-3（索引构建）在 E2E 环境存在 2 个预存失败，与本次 P1.4 改动无关，在主分支 `7455087` 提交时已存在。已记录为 P2 级 issue，不阻塞 Phase 1 交付。
 
 ---
 
@@ -109,10 +107,10 @@
 | `search-index-multi.test.ts` | 10 | ✅ | P1.3、P1.4 |
 | `domain-inference.test.ts` | 17 | ✅ | P1.4 |
 | `search-domain-weighting.test.ts` | 5 | ✅ | P1.4 |
-| `phase1-e2e.test.ts` | 5（2 fail）| ⚠️ | P1.0–P1.3 |
+| `phase1-e2e.test.ts` | 5 | ✅ | P1.0–P1.3 |
 
-**单元测试**：全部通过（`npm test` 1002 passed / 6 pre-existing failures，均与本阶段无关）  
-**E2E 测试**：3/5 通过，2 个预存 E2E 失败（已知 bug，P2 级，不阻塞交付）
+**单元测试**：全部通过（`npm test` 1006 passed / 6 pre-existing failures，均与本阶段无关）  
+**E2E 测试**：5/5 通过
 
 ---
 
@@ -120,8 +118,7 @@
 
 | 级别 | 问题 | 文件/位置 | 影响 |
 |------|------|---------|------|
-| P2 | E2E 环境下 `pull()` 未触发 CLAUDE.md 规则注入 | `phase1-e2e.test.ts` test-2 | 生产环境功能正常，仅 E2E mock 环境复现 |
-| P2 | E2E 环境下 `pull()` 未生成 `search-index.json` | `phase1-e2e.test.ts` test-3 | 同上 |
+| — | 无遗留已知问题 | — | — |
 
 ---
 
@@ -137,6 +134,6 @@
 
 ## Phase 1 结论
 
-**Phase 1 核心功能完整交付。** P1.0–P1.4 全部实现，验收项通过率 **95%+**（唯一未过项为 E2E 环境 mock 问题，不影响生产可用性）。
+**Phase 1 核心功能完整交付。** P1.0–P1.4 全部实现，验收项通过率 **100%**。
 
 检索链路已具备：agents 同步 → 四类知识库索引 → domain 加权排序 → subagent 触发规则。满足 6/12 里程碑交付条件，可进入 Phase 2（Contribute-check 优化）开发。
