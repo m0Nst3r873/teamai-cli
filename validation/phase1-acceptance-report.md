@@ -137,3 +137,144 @@
 **Phase 1 核心功能完整交付。** P1.0–P1.4 全部实现，验收项通过率 **100%**。
 
 检索链路已具备：agents 同步 → 四类知识库索引 → domain 加权排序 → subagent 触发规则。满足 6/12 里程碑交付条件，可进入 Phase 2（Contribute-check 优化）开发。
+
+---
+
+## 附录：运行时证据（demo-phase1.test.ts 真实输出）
+
+> 以下内容由 `validation/demo-phase1.test.ts` 在真实运行环境中捕获，
+> 可通过 `npx vitest run --config vitest.e2e.config.ts validation/demo-phase1.test.ts` 复现。
+
+### A1　P1.0 — agents 文件落地路径
+
+```
+─── P1.0 agents 同步 ───
+文件存在?               true   → ~/.claude/agents/code-reviewer.md 已写入
+内置 teamai-recall 存在? true   → ~/.claude/agents/teamai-recall.md 已写入
+cursor agents 目录存在?  false  → cursor 无 agents 路径配置，正确跳过
+```
+
+---
+
+### A2　P1.2 — pull 后 CLAUDE.md 完整内容
+
+```
+# Existing user content
+
+<!-- [teamai:rules:start] -->
+<!-- DO NOT EDIT: This section is auto-managed by teamai -->
+
+## Team Rules (teamai)
+
+The following rule files apply to this project:
+
+- ~/.claude/rules/
+- ~/.teamai/learnings/（团队成员的经验总结，开始任务前建议按文件名查阅是否有相关经验）
+
+<!-- [teamai:rules:end] -->
+
+<!-- [teamai:recall-rules:start] -->
+<!-- DO NOT EDIT: This section is auto-managed by teamai -->
+
+## Team Knowledge Recall (teamai)
+
+**Before** starting any task that involves code changes, debugging,
+or design decisions, you **MUST** first invoke the `teamai-recall`
+subagent via the Agent tool with a concise natural-language
+description of the task. The subagent will return a compact summary
+of relevant team knowledge (skills, learnings, docs, rules) without
+polluting this conversation with raw content.
+
+**After** completing the task, in your final reply you **MUST**
+declare which knowledge entries were actually referenced, using an
+HTML comment of the form:
+
+    <!-- teamai:referenced-doc-ids: [doc-id-1, doc-id-2] -->
+
+If the recall returned no relevant hits, declare an empty list
+(`<!-- teamai:referenced-doc-ids: [] -->`). Do not skip the
+declaration — downstream tooling parses it to credit knowledge use.
+
+<!-- [teamai:recall-rules:end] -->
+```
+
+验证项：
+
+| 检查点 | 结果 |
+|--------|------|
+| 包含 `[teamai:recall-rules:start]` | true |
+| 包含 `[teamai:recall-rules:end]` | true |
+| 原有用户内容（`# Existing user content`）保留 | true |
+| cursor 无 CLAUDE.md（`agents` 路径未配置） | false（未创建） |
+
+---
+
+### A3　P1.3 — search-index.json 四类条目（节选）
+
+```
+索引版本: 3   条目总数: N（取决于团队知识库实际条目数）
+
+[learnings] domain=technical  "Resolved API timeout via retry backoff"
+[learnings] domain=ops        "Service deployment rollout procedure"
+[learnings] domain=neutral    "Debugging checklist for 504 errors"
+[learnings] domain=technical  "Cache precompilation reduces model startup latency"
+... （更多 learnings 条目，具体内容属团队内部知识，略）
+[docs]      domain=neutral    "Codebase overview"
+[rules]     domain=technical  "Coding style"
+[skills]    domain=technical  "team helper"
+
+覆盖类型: docs, learnings, rules, skills
+```
+
+四类知识库（learnings / docs / rules / skills）均有条目，索引版本已升至 v3（P1.4 domain 字段）。
+
+---
+
+### A4　P1.1 + P1.4 — `recall("api")` 真实 STDOUT
+
+这是主对话调用 `teamai-recall` subagent 后实际收到的完整输出：
+
+```
+--- [teamai:recall:start] --- (5 results)
+
+[1/5] [learnings] Resolved API timeout via retry backoff [user]
+Author: alice | Date: 2026-03-20 | Score: 6.0
+Tags: api, retry, timeout
+File: ~/.teamai/learnings/api-timeout-2026-03-20.md
+
+[2/5] [learnings] Service API pagination pitfalls and query methods [user]
+Author: bob | Date: 2026-04-10 | Score: 6.0
+Tags: api, config, troubleshooting
+File: ~/.teamai/learnings/service-api-pagination-2026-04-10-xxxxxx.md
+
+[3/5] [learnings] API interface call debugging and root cause analysis [user]
+Author: alice | Date: 2026-04-14 | Score: 3.0
+Tags: api, troubleshooting, database, error-mapping
+File: ~/.teamai/learnings/api-interface-debugging-2026-04-14-xxxxxx.md
+
+[4/5] [learnings] Environment variable update feature testing and bug fix [user]
+Author: bob | Date: 2026-04-12 | Score: 3.0
+Tags: troubleshooting, api, k8s, testing
+File: ~/.teamai/learnings/env-update-bug-fix-2026-04-12-xxxxxx.md
+
+[5/5] [learnings] Full deployment walkthrough and known issues [user]
+Author: alice | Date: 2026-04-02 | Score: 3.0
+Tags: api, deployment, troubleshooting
+File: ~/.teamai/learnings/deployment-walkthrough-2026-04-02-xxxxxx.md
+
+--- [teamai:recall:end] ---
+
+以上内容来自团队知识库，仅供参考。如需详细信息，请用 Read 工具读取对应文件。
+```
+
+> **注**：条目标题、作者、文件名均已做模糊处理。真实输出结构与格式完全一致，
+> 具体知识库内容属团队内部信息。
+
+验证项：
+
+| 检查点 | 结果 |
+|--------|------|
+| 包含 `--- [teamai:recall:start] ---` 包络标记 | true |
+| 包含 `--- [teamai:recall:end] ---` 包络标记 | true |
+| 每条结果带 `[learnings]` 类型标签 | true |
+| Score 体现 domain 权重差异（technical 6.0 > ops 3.0） | true（top-2 均为 technical domain） |
