@@ -576,6 +576,7 @@ program
   .option('--from-iwiki <space-id-or-url>', 'Import documents from iWiki Space ID or page URL (requires TAI_PAT_TOKEN)')
   .option('--limit <n>', 'Max number of recent merged MRs to scan (used with --from-mr batch mode)', '10')
   .option('--resume', 'Resume an interrupted import session')
+  .option('--all', 'Accept all suggestions without interactive confirmation')
   .option('--output <path>', 'Write drafts to this directory instead of pushing to team repo')
   .action(async (cmdOpts) => {
     const globalOpts = program.opts() as GlobalOptions;

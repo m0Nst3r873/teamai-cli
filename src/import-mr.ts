@@ -197,7 +197,10 @@ export async function importFromMR(opts: {
           prompt: extractCodebaseSuggestionPrompt(mr),
           parse: (output: string) => {
             try {
-              return JSON.parse(output) as CodebaseSuggestionResponse;
+              // AI 可能在 JSON 前附加说明文字，提取第一个 { ... } 块
+              const jsonMatch = output.match(/\{[\s\S]*\}/);
+              const jsonStr = jsonMatch ? jsonMatch[0] : output;
+              return JSON.parse(jsonStr) as CodebaseSuggestionResponse;
             } catch {
               log.debug(`codebase suggestion JSON 解析失败，原始输出：${output.slice(0, 200)}`);
               return { needsUpdate: false, suggestions: [] };

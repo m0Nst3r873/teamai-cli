@@ -1,19 +1,49 @@
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 
 /** 默认 AI 调用超时时间（毫秒）。 */
-const DEFAULT_TIMEOUT_MS = 60_000;
+const DEFAULT_TIMEOUT_MS = 180_000;
 
 /** 默认并发数量上限。 */
 const DEFAULT_CONCURRENCY = 3;
 
 /**
- * 通过 `claude -p` 子进程调用 Claude CLI，返回 stdout 文本。
+ * 按优先级探测可用的 Claude CLI 可执行文件名。
+ *
+ * 探测顺序：`claude` → `claude-internal`。
+ * 结果缓存，进程生命周期内只探测一次。
+ *
+ * @returns 可用的 CLI 命令名
+ * @throws  两者均不可用时抛出 Error
+ */
+function detectClaudeCli(): string {
+  for (const cmd of ['claude', 'claude-internal']) {
+    try {
+      execFileSync(cmd, ['--version'], { stdio: 'ignore' });
+      return cmd;
+    } catch {
+      // 继续尝试下一个
+    }
+  }
+  throw new Error(
+    'Claude CLI 不可用：请安装 claude 或 claude-internal，' +
+    '详见 https://docs.anthropic.com/claude-code'
+  );
+}
+
+/** 缓存探测到的 CLI 命令名，避免重复 execFileSync。 */
+let _claudeCmd: string | undefined;
+
+/**
+ * 通过 `claude -p`（或 `claude-internal -p`）子进程调用 Claude CLI，返回 stdout 文本。
+ *
+ * CLI 探测优先级：`claude` → `claude-internal`，结果缓存，进程内只探测一次。
  *
  * @param prompt   传递给 claude 的提示词
  * @param opts     可选参数：timeout 超时毫秒数，默认 60000
  * @returns        claude 输出的 stdout（已 trim）
  * @throws         超时时抛出 `Error('AI call timed out after Xs')`
  * @throws         退出码非 0 时抛出 `Error('AI call failed: <stderr>')`
+ * @throws         claude / claude-internal 均不可用时抛出 Error
  */
 export async function callClaude(
   prompt: string,
@@ -25,7 +55,10 @@ export async function callClaude(
     const chunks: Buffer[] = [];
     const errChunks: Buffer[] = [];
 
-    const child = spawn('claude', ['-p', prompt], { stdio: ['ignore', 'pipe', 'pipe'] });
+    if (_claudeCmd === undefined) {
+      _claudeCmd = detectClaudeCli();
+    }
+    const child = spawn(_claudeCmd, ['-p', prompt], { stdio: ['ignore', 'pipe', 'pipe'] });
 
     child.stdout.on('data', (chunk: Buffer) => chunks.push(chunk));
     child.stderr.on('data', (chunk: Buffer) => errChunks.push(chunk));
