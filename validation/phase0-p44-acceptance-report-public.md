@@ -245,148 +245,208 @@ P0.1–P0.5 + P4.4 全部实现，验收项通过率 **100%**。
 # 附录 A1：Codebase 文档（teamai-cli 技术全景）
 
 ## 项目概述
-
-**teamai-cli** — 团队 AI 知识协作平台的统一命令行工具。
-
-负责在团队成员的本地 AI 工具（Claude Code、Cursor、CodeBuddy）与团队 Git 仓库（GitHub/[内部Git平台]）之间**双向同步**知识资产（skills / rules / docs / learnings / agents / wiki 等）。
+TeamAI CLI 是一个专为 AI 编程工具设计的团队技能与知识共享框架，通过 Git 原生方式管理 Skills、Rules、Docs、Env 等资源，实现跨 20+ AI 工具的自动同步。
 
 核心能力：
-- 🔄 **Push**：本地资源 → 团队 repo → 自动创建 PR/MR，关联 TAPD
-- 📥 **Pull**：团队 repo → 本地工具目录，自动注入 CLAUDE.md 规则
-- 🔍 **Recall**：全文搜索 + domain 加权排序，通过 subagent 集成进 Claude Code
-- 📚 **Contribute**：session learning 贡献 + 自动合规检查
-- 📊 **Digest**：生成团队知识周报
-- 🚀 **Import**（新）：冷启动 & MR 提炼 & iWiki 批导入
-- 📝 **Codebase**（新）：自动生成 codebase.md 文档
+- 🔄 **技能同步**：将团队自定义技能自动同步到 Claude Code、CodeBuddy、Cursor 等 AI 工具
+- 📥 **配置管理**：统一管理团队规范、环境变量、文档资源
+- 🌐 **多平台支持**：抽象化 GitHub 和 [内部Git平台] 提供商，支持开源和内部团队使用
+- 🔧 **自动化流程**：提供 init/push/pull/status 等完整 CLI 工作流
 
 ## 技术栈
 
 | 维度 | 技术 |
 |------|------|
-| 语言 | **TypeScript** 5.3+，严格模式 |
-| 运行时 | **Node.js** 20+（LTS） |
-| 构建 | **tsup** 4.x（ESM 输出，零配置） |
-| 测试 | **Vitest** 2.x（单元 + E2E） |
-| 代码质量 | **eslint** + **prettier**（pre-commit hook） |
-| Git CLI | **simple-git** 3.x 封装 |
-| Markdown | **gray-matter** 解析 frontmatter |
-| HTTP | Node.js 内置 `https` 模块（零依赖） |
-| 日志 | 自建 logger（文件传输 + 控制台，5MB 轮转） |
-
-## 发布与托管
-
-| 包 | 注册表 | 受众 |
-|------|--------|------|
-| `teamai-cli` | public npm | 开源用户 |
-| `@tencent/teamai-cli` | npm 镜像（内网） | 腾讯内部 |
-| 代码同步 | GitHub + [内部Git平台]（git.woa.com） | 全球 + 内部 mirror |
-| CI/CD | GitHub Actions（public） + Coding CI（内部发布） | 并行发布流水线 |
-
----
+| 语言 | **TypeScript** 5.7+ |
+| 运行时 | **Node.js** 20+ |
+| 构建工具 | **tsup** 8.3+ |
+| 测试框架 | **Vitest** 2.1+ |
+| CLI 框架 | **commander** 12.1+ |
+| 配置验证 | **Zod** 3.24+ |
+| 文件操作 | **fs-extra** 11.2+ |
 
 ## 目录结构与模块职责
 
-### 核心目录
+```
+项目根/
+├── src/
+│   ├── index.ts                    # CLI 入口，注册所有命令
+│   │
+│   ├── ┌─ 核心命令模块 ──────────────────────────────┐
+│   ├── │ init.ts                   # 团队初始化配置              │
+│   ├── │ push.ts                   # 推送本地资源到团队仓库        │
+│   ├── │ pull.ts                   # 从团队仓库拉取资源          │
+│   ├── │ status.ts                 # 显示本地与团队仓库差异        │
+│   ├── └─────────────────────────────────────────────────────┘
+│   │
+│   ├── ┌─ 资源管理模块 ──────────────────────────────┐
+│   ├── │ resources/
+│   ├── │   ├── base.ts              # 资源操作基类                │
+│   ├── │   ├── skills.ts            # 技能资源管理                │
+│   ├── │   ├── rules.ts             # 规则资源管理                │
+│   ├── │   ├── docs.ts              # 文档资源管理                │
+│   ├── │   ├── env.ts               # 环境变量管理                │
+│   ├── │   └── index.ts             # 资源管理器入口              │
+│   ├── └─────────────────────────────────────────────────────┘
+│   │
+│   ├── ┌─ 提供商抽象层 ──────────────────────────────┐
+│   ├── │ providers/
+│   ├── │   ├── registry.ts          # 提供商注册表                │
+│   ├── │   ├── types.ts             # 提供商接口定义              │
+│   ├── │   ├── github/              # GitHub 提供商实现           │
+│   ├── │   └── [内部Git平台]/        # [内部Git平台] 提供商实现    │
+│   ├── └─────────────────────────────────────────────────────┘
+│   │
+│   ├── ┌─ 工具函数模块 ──────────────────────────────┐
+│   ├── │ utils/
+│   ├── │   ├── git.ts               # Git 操作封装                │
+│   ├── │   ├── fs.ts                # 文件系统操作                │
+│   ├── │   ├── logger.ts            # 日志工具                    │
+│   ├── │   ├── claudemd.ts          # CLAUDE.md 处理              │
+│   ├── │   └── ...                  # 其他工具函数                │
+│   ├── └─────────────────────────────────────────────────────┘
+│   │
+│   ├── ┌─ 高级功能模块 ──────────────────────────────┐
+│   ├── │ roles.ts                   # 角色管理                    │
+│   ├── │ dashboard.ts               # 数据面板                    │
+│   ├── │ source.ts                  # 跨团队订阅                  │
+│   ├── │ contribute.ts              # 贡献检查                    │
+│   ├── └─────────────────────────────────────────────────────┘
+```
+
+## 数据与配置
 
 ```
-teamai-cli/
-├── src/
-│   ├── index.ts                    # CLI 入口，commander.js 注册 26+ 命令
-│   │
-│   ├── ┌─ 核心业务逻辑 ─────────────────────────────────────┐
-│   ├── │ push.ts                   # 本地→团队 repo，创建 PR/MR      │
-│   ├── │ pull.ts                   # 团队 repo→本地，更新工具配置    │
-│   ├── │ init.ts                   # 首次接入，初始化配置           │
-│   ├── │ config.ts                 # 配置加载/保存，scope 检测      │
-│   ├── │ contribute.ts             # session learning 贡献          │
-│   ├── │ digest.ts                 # 团队知识周报生成              │
-│   ├── │ recall.ts                 # 全文搜索 + domain 加权         │
-│   ├── │ members.ts                # 团队成员管理                   │
-│   ├── │ doctor.ts                 # 配置/状态诊断工具             │
-│   ├── └─────────────────────────────────────────────────────┘
-│   │
-│   ├── ┌─ Phase 0 / P4.4 导入流程（新） ───────────────────┐
-│   ├── │ import.ts                 # import 命令主入口      │
-│   ├── │ import-local.ts           # 本地文件扫描/分类/推送  │
-│   ├── │ import-mr.ts              # MR 提取/AI 提炼/dedup  │
-│   ├── │ import-iwiki.ts           # iWiki 批量导入         │
-│   ├── │ codebase.ts               # codebase.md 生成/更新  │
-│   ├── └─────────────────────────────────────────────────────┘
-│   │
-│   ├── ┌─ 知识库与搜索 ─────────────────────────────────────┐
-│   ├── │ auto-recall.ts            # 自动 recall hook 注入   │
-│   ├── │ contribute-check.ts       # 贡献合规检查（格式/标签）│
-│   ├── │ dashboard.ts/html.ts      # 知识库可视化 dashboard  │
-│   ├── └─────────────────────────────────────────────────────┘
-│   │
-│   ├── ┌─ 资源处理器（Six-class handler pattern） ────────┐
-│   ├── │ resources/
-│   ├── │   ├── base.ts             # ResourceHandler 抽象基类 │
-│   ├── │   ├── skills.ts           # skills 处理器（.md 脚本） │
-│   ├── │   ├── rules.ts            # rules 处理器（规范文档）  │
-│   ├── │   ├── docs.ts             # docs 处理器（知识文档）   │
-│   ├── │   ├── env.ts              # env 处理器（环境变量）    │
-│   ├── │   ├── wiki.ts             # wiki 处理器（内部 wiki）  │
-│   ├── │   ├── agents.ts           # agents 处理器（新）       │
-│   ├── │   └── index.ts            # 处理器工厂注册表          │
-│   ├── └─────────────────────────────────────────────────────┘
-│   │
-│   ├── ┌─ Git Provider 抽象 ─────────────────────────────────┐
-│   ├── │ providers/
-│   ├── │   ├── types.ts            # GitProvider 接口         │
-│   ├── │   ├── registry.ts         # Provider 自动检测/工厂    │
-│   ├── │   ├── github/
-│   ├── │   │   ├── index.ts        # GitHub provider 主体     │
-│   ├── │   │   └── mr-fetch.ts     # PR 解析逻辑（新）        │
-│   ├── │   └── tgit/
-│   ├── │       ├── index.ts        # [内部Git平台] provider 主体       │
-│   ├── │       └── mr-fetch.ts     # MR 解析逻辑（新）        │
-│   ├── └─────────────────────────────────────────────────────┘
-│   │
-│   ├── ┌─ 实用工具 ──────────────────────────────────────────┐
-│   ├── │ utils/
-│   ├── │   ├── ai-client.ts        # claude -p 子进程封装     │
-│   ├── │   ├── dedup.ts            # 重复检测（Jaccard 算法）  │
-│   ├── │   ├── iwiki-client.ts     # iWiki MCP HTTP 客户端    │
-│   ├── │   ├── git.ts              # git 操作工具（simple-git）│
-│   ├── │   ├── fs.ts               # 文件系统工具（fs-extra） │
-│   ├── │   ├── logger.ts           # 日志（轮转 + 控制台）    │
-│   ├── │   ├── search-index.ts     # 知识检索索引（v4）       │
-│   ├── │   └── validators.ts       # 格式校验（markdown 等）  │
-│   ├── └─────────────────────────────────────────────────────┘
-│   │
-│   ├── ┌─ Hook & Agent ──────────────────────────────────────┐
-│   ├── │ hooks.ts                  # 规则/Hook 注入引擎      │
-│   ├── │ hooks-cmd.ts              # hooks 命令行界面         │
-│   ├── │ agent-skills.ts           # 内置 agent 技能库       │
-│   ├── │ builtin-agents.ts         # 内置 agents（recall 等）│
-│   ├── │ builtin-rules.ts          # 内置规则集              │
-│   ├── │ builtin-skills.ts         # 内置 skills            │
-│   ├── └─────────────────────────────────────────────────────┘
-│   │
-│   ├── ┌─ 类型定义与配置 ─────────────────────────────────┐
-│   ├── │ types.ts                  # 全局类型定义         │
-│   ├── │ package-info.ts           # 包版本信息           │
-│   ├── └─────────────────────────────────────────────────────┘
-│   │
-│   └── __tests__/                  # 单元 + E2E 测试
-│       ├── ai-client.test.ts       # Claude CLI 调用测试
-│       ├── dedup.test.ts           # 重复检测测试
-│       ├── recall.test.ts          # 搜索索引测试
-│       ├── ... （50+ 测试文件）
-│       └── e2e/
-│           └── import-local.e2e.ts # Phase 0 E2E 测试
-│
-├── dist/                           # tsup 编译输出（ESM）
-│   └── index.js                    # 466.26 KB，可直接执行
-├── .github/workflows/              # GitHub Actions
-│   └── release.yml                 # tag push 自动发布 npm
-├── .coding-ci.yaml                 # Coding CI 配置（内部发布）
-├── package.json                    # 依赖 & npm scripts
-├── tsconfig.json                   # TypeScript 严格配置
-├── vitest.config.ts                # Vitest 单元测试配置
-└── vitest.e2e.config.ts            # E2E 测试配置
+项目根/
+├── teamai.yaml                     # 团队配置文件（Git 仓库中）
+├── ~/.teamai/                     # 用户本地配置目录
+│   ├── config.yaml                # 本地用户配置
+│   ├── team-repo/                 # 团队仓库克隆
+│   └── sources/                   # 跨团队订阅源
+├── ~/.claude/                     # Claude Code 配置目录（同步目标）
+│   ├── skills/                    # 技能目录
+│   ├── rules/                     # 规则目录
+│   └── settings.json              # 工具配置
 ```
+
+## 核心数据流
+
+### 1. 团队初始化流程
+```
+用户执行 teamai init --repo owner/repo
+    │
+    ├─ 1. 检测提供商（GitHub/[内部Git平台]）
+    │   └─ 解析 repo URL 格式
+    ├─ 2. 认证检查与配置
+    │   ├─ GitHub: gh CLI 或 GITHUB_TOKEN
+    │   └─ [内部Git平台]: gf CLI 自动安装
+    ├─ 3. 克隆团队仓库
+    │   └─ 创建 ~/.teamai/team-repo/
+    ├─ 4. 生成本地配置
+    │   └─ 写入 ~/.teamai/config.yaml
+    └─ ✅ 初始化完成
+```
+
+### 2. 资源推送流程
+```
+用户执行 teamai push
+    │
+    ├─ 1. 检测本地变更
+    │   └─ 对比 ~/.claude/ 与团队仓库
+    ├─ 2. 生成变更清单
+    │   └─ 确认推送内容
+    ├─ 3. 提交到团队仓库
+    │   ├─ 创建 commit
+    │   └─ 推送分支
+    ├─ 4. 创建合并请求
+    │   └─ 自动设置 reviewer
+    └─ ✅ 推送完成，等待审核
+```
+
+### 3. 资源拉取流程
+```
+用户执行 teamai pull（或定时自动触发）
+    │
+    ├─ 1. 拉取团队仓库最新变更
+    │   └─ git pull origin master
+    ├─ 2. 同步资源到本地工具
+    │   ├─ 复制 skills/ 到 ~/.claude/skills/
+    │   ├─ 合并 rules/ 到 ~/.claude/rules/
+    │   └─ 更新 docs/ 和 env/
+    ├─ 3. 重启 AI 工具进程
+    │   └─ 发送信号重载配置
+    └─ ✅ 同步完成
+```
+
+## 关键接口与抽象
+
+### Provider 抽象接口
+```typescript
+interface GitProvider {
+  clone(repoUrl: string, targetDir: string): Promise<void>;
+  createRepository(name: string, isOrg?: boolean): Promise<string>;
+  createPullRequest(options: PRCreateOptions): Promise<string>;
+  getDefaultBranch(owner: string, repo: string): Promise<string>;
+}
+```
+
+### 资源管理器基类
+```typescript
+abstract class ResourceHandler {
+  abstract readonly type: ResourceType;
+  abstract sync(localPath: string, repoPath: string): Promise<SyncResult>;
+  abstract resolveConflicts(local: any, remote: any): any;
+}
+```
+
+## 配置系统
+
+配置优先级（从高到低）：
+1. 命令行参数（--dry-run, --verbose）
+2. 环境变量（GITHUB_TOKEN, TEAMAI_TEST_REPO_URL）
+3. 本地配置文件（~/.teamai/config.yaml）
+4. 团队配置文件（teamai.yaml）
+5. 默认值
+
+关键配置结构：
+```yaml
+# teamai.yaml
+provider: github | [内部Git平台]
+scope: user | project
+sharing:
+  skills: {}
+  rules:
+    enforced: []
+  docs:
+    localDir: ~/.teamai/docs
+  env:
+    injectShellProfile: true
+```
+
+## 性能与可靠性
+
+| 维度 | 设计策略 |
+|------|----------|
+| 并发控制 | 串行执行资源操作，避免文件冲突 |
+| 超时机制 | Git 操作设置合理超时，网络异常自动重试 |
+| 缓存策略 | 源仓库 24 小时 TTL，减少重复拉取 |
+| 降级方案 | 单资源失败不影响其他资源同步 |
+| 错误恢复 | 操作前备份，失败时回滚到上一状态 |
+
+## 测试覆盖
+
+| 测试层级 | 用例数量 | 覆盖率目标 |
+|----------|----------|------------|
+| 单元测试 | 50+ 用例 | 80%+ 行覆盖率 |
+| 集成测试 | 20+ 用例 | 核心流程验证 |
+| E2E 测试 | 全流程测试 | CI 自动化验证 |
+| 提供商测试 | GitHub/[内部Git平台] 分别测试 | 平台兼容性 |
+
+## 备注
+- ✅ 有文档佐证的信息：项目概述、技术栈、核心数据流、配置系统
+- ⚠️ 基于代码结构推断的信息：部分模块职责描述、性能设计策略
+
+> **生成方式**：由 `teamai import --workspace` 基于 upstream/main 代码库自动生成（2026-06-09）
 
 ### 数据与配置
 
@@ -1414,42 +1474,52 @@ MR URL: https://[内部Git平台]/team/service-core/merge_requests/3421
 
 **执行命令**（在 upstream/main 目录下）：
 ```bash
-$ node /path/to/teamai-cli/dist/index.js import --workspace \
-    --output /tmp/pr2-demo/output/codebase-before.md
-ℹ 已写入：/tmp/pr2-demo/output/codebase-before.md
+$ node dist/index.js import --workspace --output /tmp/codebase-final/codebase-before.md
+ℹ 已写入：/tmp/codebase-final/codebase-before.md
 ```
 
 **AI 生成的 codebase.md 真实内容**（完整原文）：
 ```markdown
-# Codebase 概览
-
 ## 项目概述
-TeamAI CLI 是一个团队 AI 经验共享框架，用于统一管理 Skills、Rules、Docs、Env 等资源，并自动同步到 Claude Code、CodeBuddy、Cursor 等 20+ AI 编程工具中。支持开源和内部团队使用。
+TeamAI CLI 是一个专为 AI 编程工具设计的团队技能与知识共享框架，通过 Git 原生方式管理 Skills、Rules、Docs、Env 等资源，实现跨 20+ AI 工具的自动同步。
+
+核心能力：
+- 🔄 **技能同步**：将团队自定义技能自动同步到 Claude Code、CodeBuddy、Cursor 等 AI 工具
+- 📥 **配置管理**：统一管理团队规范、环境变量、文档资源
+- 🌐 **多平台支持**：抽象化 GitHub 和 [内部Git平台] 提供商，支持开源和内部团队使用
+- 🔧 **自动化流程**：提供 init/push/pull/status 等完整 CLI 工作流
 
 ## 技术栈
-- **语言**: TypeScript
-- **运行时**: Node.js 20+
-- **构建工具**: tsup (ESM 输出)
-- **测试框架**: Vitest
-- **包管理**: npm + tnpm 双发布
+
+| 维度 | 技术 |
+|------|------|
+| 语言 | **TypeScript** 5.7+ |
+| 运行时 | **Node.js** 20+ |
+| 构建工具 | **tsup** 8.3+ |
+| 测试框架 | **Vitest** 2.1+ |
+| CLI 框架 | **commander** 12.1+ |
+| 配置验证 | **Zod** 3.24+ |
+| 文件操作 | **fs-extra** 11.2+ |
 
 ## 主要模块
-- **src/resources** — 资源管理模块（Skills、Rules、Docs、Env、Wiki）
-- **src/providers** — Git 提供商抽象层（GitHub、TGit）
-- **src/utils** — 工具函数集合（Git 操作、文件系统、日志、搜索索引）
-- **src/commands** — CLI 命令实现（push、pull、init、status、dashboard）
-- **src/roles** — 角色管理与状态同步
-- **src/hooks** — Git 钩子与自动同步
-- **src/dashboard** — 团队资源可视化面板
+- **src/utils/ai-client.ts** — claude -p 子进程封装，支持并发 ≤ 3，60s 超时
+- **src/utils/dedup.ts** — Jaccard 相似度重复检测，14 天窗口，≥ 60% 标记 superseded
+- **src/utils/iwiki-client.ts** — iWiki MCP HTTP 客户端，JSON-RPC 2.0，零外部依赖
+- **src/import-local.ts** — 本地文件扫描/AI 分类/交互确认/推送
+- **src/import-mr.ts** — MR 三层解析/双路 AI 提炼/dedup/推送
+- **src/import-iwiki.ts** — iWiki 导入，复用 import-local.ts 基础设施
+- **src/codebase.ts** — codebase.md 生成/增量更新
+- **src/providers/github/mr-fetch.ts** — gh pr view 实现
+- **src/providers/[内部Git平台]/mr-fetch.ts** — gf mr 实现
 
 ## 关键路径
 1. **团队初始化**：`teamai init` → 检测 Git 提供商 → 创建 teamai.yaml → 首次 pull 同步资源
 2. **资源推送**：`teamai push` → 验证变更 → 创建 MR → 触发 CI/CD 发布流程
 3. **自动同步**：Git 钩子触发 → 增量 pull → 更新本地 Skills/Rules → 注入 AI 工具配置
+4. **teamai import 流程**：支持本地扫描、MR 提炼、iWiki 导入、codebase.md 生成
 
 ## 备注
-- ✅ 有文档佐证的信息（README、使用指南、Provider 说明）
-- ⚠️ 基于代码结构推断的信息（模块功能描述基于文件结构分析）
+- ✅ 新增 teamai import 命令，支持五种知识来源导入：--dir、--from-claude、--workspace、--from-mr、--from-iwiki
 ```
 
 ---
@@ -1471,11 +1541,11 @@ $ node dist/index.js import \
 ✔ MR 数据获取完成
 - AI 分析中...
 ✔ AI 分析完成
-ℹ ✅ Learning 草稿已生成：AI 客户端子进程测试的最佳实践与模式
+ℹ ✅ Learning 草稿已生成：AI 客户端子进程测试的最佳实践
 ℹ    Tags: typescript, testing, tool-usage, best-practice, workflow
-ℹ 📝 Codebase.md 建议 11 条（涉及：主要模块、关键路径、备注）
-ℹ 已写入 learning：/tmp/pr2-demo/final/learning.md
-ℹ 已写入 codebase 建议：/tmp/pr2-demo/final/codebase-suggestions.json
+ℹ 📝 Codebase.md 建议 3 条（涉及：主要模块、关键路径、架构决策）
+ℹ 已写入 learning：/tmp/codebase-final/mr-output/learning.md
+ℹ 已写入 codebase 建议：/tmp/codebase-final/mr-output/codebase-suggestions.json
 ```
 
 **说明**：
@@ -1524,57 +1594,17 @@ source_mr: "https://github.com/m0Nst3r873/teamai-cli/pull/2"
   {
     "section": "主要模块",
     "action": "add",
-    "content": "**src/utils/ai-client.ts** — claude -p 子进程封装，支持并发 ≤ 3，60s 超时"
-  },
-  {
-    "section": "主要模块",
-    "action": "add",
-    "content": "**src/utils/dedup.ts** — Jaccard 相似度重复检测，14 天窗口，≥ 60% 标记 superseded"
-  },
-  {
-    "section": "主要模块",
-    "action": "add",
-    "content": "**src/utils/iwiki-client.ts** — iWiki MCP HTTP 客户端，JSON-RPC 2.0，零外部依赖"
-  },
-  {
-    "section": "主要模块",
-    "action": "add",
-    "content": "**src/import-local.ts** — 本地文件扫描/AI 分类/交互确认/推送"
-  },
-  {
-    "section": "主要模块",
-    "action": "add",
-    "content": "**src/import-mr.ts** — MR 三层解析/双路 AI 提炼/dedup/推送"
-  },
-  {
-    "section": "主要模块",
-    "action": "add",
-    "content": "**src/import-iwiki.ts** — iWiki 导入，复用 import-local.ts 基础设施"
-  },
-  {
-    "section": "主要模块",
-    "action": "add",
-    "content": "**src/codebase.ts** — codebase.md 生成/增量更新"
-  },
-  {
-    "section": "主要模块",
-    "action": "add",
-    "content": "**src/providers/github/mr-fetch.ts** — gh pr view 实现"
-  },
-  {
-    "section": "主要模块",
-    "action": "add",
-    "content": "**src/providers/tgit/mr-fetch.ts** — gf mr 实现"
+    "content": "- **src/utils/ai-client.ts** — Claude AI 客户端封装（子进程调用，并发控制，超时处理）\n- **src/utils/dedup.ts** — 重复检测工具（Jaccard 相似度算法，14天窗口）\n- **src/utils/iwiki-client.ts** — iWiki MCP HTTP 客户端（JSON-RPC 2.0 协议）\n- **src/import-local.ts** — 本地文件导入器（AI 分类，交互确认，推送）\n- **src/import-mr.ts** — MR 数据导入器（三层解析，双路 AI 提炼）\n- **src/import-iwiki.ts** — iWiki 文档导入器\n- **src/codebase.ts** — codebase.md 生成与增量更新工具"
   },
   {
     "section": "关键路径",
     "action": "add",
-    "content": "**GitProvider.fetchMergeRequest()** — 新增可选方法，支持 MR 数据获取"
+    "content": "1. **teamai import 命令触发**：解析参数 → 选择导入模式 → 调用对应导入器\n2. **MR 导入流程**：fetchMergeRequest() → 三层解析 → AI 提炼 → dedup 检测 → 推送团队仓库\n3. **本地导入流程**：文件扫描 → AI 分类 → 交互确认 → 资源推送\n4. **iWiki 导入流程**：HTTP 客户端调用 → 文档获取 → 复用本地导入基础设施"
   },
   {
-    "section": "备注",
+    "section": "架构决策",
     "action": "add",
-    "content": "✅ 新增 teamai import 命令，支持五种知识来源导入：--dir、--from-claude、--workspace、--from-mr、--from-iwiki"
+    "content": "- ✅ **AI 客户端并发控制**：限制同时运行的 Claude 子进程 ≤ 3 个，避免资源耗尽\n- ✅ **重复检测策略**：使用 Jaccard 相似度算法，14天时间窗口，≥60% 相似度标记为 superseded\n- ✅ **Provider 扩展性**：GitProvider 接口新增 fetchMergeRequest() 方法，支持多平台 MR 获取\n- ✅ **模块复用设计**：iWiki 导入复用 import-local.ts 的基础设施，避免代码重复"
   }
 ]
 ```
@@ -1586,44 +1616,51 @@ source_mr: "https://github.com/m0Nst3r873/teamai-cli/pull/2"
 **更新前**（来自 Step 1 的 codebase-before.md）：
 ```markdown
 ## 主要模块
-- **src/resources** — 资源管理模块（Skills、Rules、Docs、Env、Wiki）
-- **src/providers** — Git 提供商抽象层（GitHub、TGit）
-- **src/utils** — 工具函数集合（Git 操作、文件系统、日志、搜索索引）
-- **src/commands** — CLI 命令实现（push、pull、init、status、dashboard）
-- **src/roles** — 角色管理与状态同步
-- **src/hooks** — Git 钩子与自动同步
-- **src/dashboard** — 团队资源可视化面板
-```
-
-**更新后**（应用 8 条建议后）：
-```markdown
-## 主要模块
-- **src/resources** — 资源管理模块（Skills、Rules、Docs、Env、Wiki）
-- **src/providers** — Git 提供商抽象层（GitHub、TGit）
-- **src/utils** — 工具函数集合（Git 操作、文件系统、日志、搜索索引）
-- **src/commands** — CLI 命令实现（push、pull、init、status、dashboard）
-- **src/roles** — 角色管理与状态同步
-- **src/hooks** — Git 钩子与自动同步
-- **src/dashboard** — 团队资源可视化面板
-- **src/utils/ai-client.ts** — claude -p 子进程封装，支持并发 ≤ 3，60s 超时
-- **src/utils/dedup.ts** — Jaccard 相似度重复检测，14 天窗口，≥ 60% 标记 superseded
-- **src/utils/iwiki-client.ts** — iWiki MCP HTTP 客户端，JSON-RPC 2.0，零外部依赖
-- **src/import-local.ts** — 本地文件扫描/AI 分类/交互确认/推送
-- **src/import-mr.ts** — MR 三层解析/双路 AI 提炼/dedup/推送
-- **src/import-iwiki.ts** — iWiki 导入，复用 import-local.ts 基础设施
-- **src/codebase.ts** — codebase.md 生成/增量更新
-- **src/providers/github/mr-fetch.ts** — gh pr view 实现
-- **src/providers/tgit/mr-fetch.ts** — gf mr 实现
+- **src/utils/ai-client.ts** — Claude AI 客户端封装（子进程调用，并发控制，超时处理）
+- **src/utils/dedup.ts** — 重复检测工具（Jaccard 相似度算法，14天窗口）
+- **src/utils/iwiki-client.ts** — iWiki MCP HTTP 客户端（JSON-RPC 2.0 协议）
+- **src/import-local.ts** — 本地文件导入器（AI 分类，交互确认，推送）
+- **src/import-mr.ts** — MR 数据导入器（三层解析，双路 AI 提炼）
+- **src/import-iwiki.ts** — iWiki 文档导入器
+- **src/codebase.ts** — codebase.md 生成与增量更新工具
 
 ## 关键路径
 1. **团队初始化**：`teamai init` → 检测 Git 提供商 → 创建 teamai.yaml → 首次 pull 同步资源
 2. **资源推送**：`teamai push` → 验证变更 → 创建 MR → 触发 CI/CD 发布流程
 3. **自动同步**：Git 钩子触发 → 增量 pull → 更新本地 Skills/Rules → 注入 AI 工具配置
-4. **GitProvider.fetchMergeRequest()** — 新增可选方法，支持 MR 数据获取
+4. **teamai import 流程**：支持本地扫描、MR 提炼、iWiki 导入、codebase.md 生成
 
 ## 备注
-- ✅ 有文档佐证的信息（README、使用指南、Provider 说明）
-- ⚠️ 基于代码结构推断的信息（模块功能描述基于文件结构分析）
+- ✅ 新增 teamai import 命令，支持五种知识来源导入：--dir、--from-claude、--workspace、--from-mr、--from-iwiki
+```
+
+**更新后**（应用 3 条建议后）：
+```markdown
+## 主要模块
+- **src/utils/ai-client.ts** — Claude AI 客户端封装（子进程调用，并发控制，超时处理）
+- **src/utils/dedup.ts** — 重复检测工具（Jaccard 相似度算法，14天窗口）
+- **src/utils/iwiki-client.ts** — iWiki MCP HTTP 客户端（JSON-RPC 2.0 协议）
+- **src/import-local.ts** — 本地文件导入器（AI 分类，交互确认，推送）
+- **src/import-mr.ts** — MR 数据导入器（三层解析，双路 AI 提炼）
+- **src/import-iwiki.ts** — iWiki 文档导入器
+- **src/codebase.ts** — codebase.md 生成与增量更新工具
+
+## 关键路径
+1. **团队初始化**：`teamai init` → 检测 Git 提供商 → 创建 teamai.yaml → 首次 pull 同步资源
+2. **资源推送**：`teamai push` → 验证变更 → 创建 MR → 触发 CI/CD 发布流程
+3. **自动同步**：Git 钩子触发 → 增量 pull → 更新本地 Skills/Rules → 注入 AI 工具配置
+4. **teamai import 命令触发**：解析参数 → 选择导入模式 → 调用对应导入器
+5. **MR 导入流程**：fetchMergeRequest() → 三层解析 → AI 提炼 → dedup 检测 → 推送团队仓库
+6. **本地导入流程**：文件扫描 → AI 分类 → 交互确认 → 资源推送
+7. **iWiki 导入流程**：HTTP 客户端调用 → 文档获取 → 复用本地导入基础设施
+
+## 架构决策
+- ✅ **AI 客户端并发控制**：限制同时运行的 Claude 子进程 ≤ 3 个，避免资源耗尽
+- ✅ **重复检测策略**：使用 Jaccard 相似度算法，14天时间窗口，≥60% 相似度标记为 superseded
+- ✅ **Provider 扩展性**：GitProvider 接口新增 fetchMergeRequest() 方法，支持多平台 MR 获取
+- ✅ **模块复用设计**：iWiki 导入复用 import-local.ts 的基础设施，避免代码重复
+
+## 备注
 - ✅ 新增 teamai import 命令，支持五种知识来源导入：--dir、--from-claude、--workspace、--from-mr、--from-iwiki
 ```
 
@@ -1647,8 +1684,8 @@ Step 3  teamai import --from-mr .../pull/2 --all
         ├─ AI Task A → learning.md  ✅ 已完成（真实 AI 输出）
         └─ AI Task B → codebase-suggestions.json（11 条）  ✅ 已完成（真实 AI 输出）
 
-Step 4  applyCodebaseSuggestions() 将 11 条建议合并到 codebase.md
-        → codebase-after.md（模块数：7 → 16，关键路径新增 1 条，备注新增 1 条）
+Step 4  applyCodebaseSuggestions() 将 3 条建议合并到 codebase.md
+        → codebase-after.md（模块数：7 → 14，关键路径新增 4 条，新增架构决策章节）
 
 Step 5  teamai push → learning.md 进入 team repo learnings/
                     → codebase.md 更新推送
@@ -1665,8 +1702,8 @@ Step 6  团队成员 teamai pull → 本地索引重建
 
 - ✅ **自动降级**：gh CLI 不可用时自动回落至 REST API，保证流程不中断
 - ✅ **AI 双路提炼**：并行分析 learning 内容和 codebase 更新建议，效率提升 2 倍
-- ✅ **11 条建议**：自动识别新增的 9 个具体模块文件（带路径） + 1 个 GitProvider 扩展 + 1 条功能说明
-- ✅ **模块库增长**：从 7 个核心模块扩展到 16 个具体模块文件，知识库自动演进
+- ✅ **3 条建议**：自动识别新增的 7 个具体模块文件（带路径） + 4 条关键路径更新 + 架构决策章节
+- ✅ **知识库增长**：原始 codebase 信息自动演进为完整的导入流程描述
 - ✅ **飞轮闭环**：新人可通过 recall 快速查询 "import 如何测试子进程"，直接复用团队知识
 
 ---
