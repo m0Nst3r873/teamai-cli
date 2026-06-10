@@ -1342,15 +1342,25 @@ $ node dist/index.js import \
 ✔ 已写入更新后的 codebase.md：/tmp/pr2-demo-v2/codebase-after.md
 ```
 
-**codebase-after.md 主要模块章节变化**（before → after diff）：
+**codebase-before.md → codebase-after.md 变更（unified diff）：**
 
-```markdown
-## 主要模块
-
-- **src/import-local.ts** — 本地文件扫描/AI 分类/交互确认/推送
-- **src/import-mr.ts** — MR 三层解析/双路 AI 提炼/dedup/推送
-- **src/import-iwiki.ts** — iWiki 导入（复用 import-local.ts 基础设施）
-- **src/codebase.ts** — codebase.md 生成/增量更新/索引生成/lint 检查
+```diff
+--- codebase-before.md
++++ codebase-after.md
+@@ -94,6 +94,13 @@
+ │   ├── └─────────────────────────────────────────────────────┘
+ ```
+ 
++## 主要模块
++
++- **src/import-local.ts** — 本地文件扫描/AI 分类/交互确认/推送
++- **src/import-mr.ts** — MR 三层解析/双路 AI 提炼/dedup/推送
++- **src/import-iwiki.ts** — iWiki 导入（复用 import-local.ts 基础设施）
++- **src/codebase.ts** — codebase.md 生成/增量更新/索引生成/lint 检查
++
+ ## 数据与配置
+ 
+ ```
 ```
 
 ---
