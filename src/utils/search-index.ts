@@ -124,6 +124,22 @@ const TYPE_BONUS: Record<KnowledgeType, number> = {
 };
 
 /**
+ * codebase 索引文件名（高权重代理，取代全量 codebase.md）。
+ * 同目录下若存在同名全量文档，将被自动跳过收录。
+ */
+const CODEBASE_INDEX_FILENAME = 'codebase-index.md';
+
+/**
+ * codebase 全量文档文件名，有索引文件存在时跳过收录。
+ */
+const CODEBASE_FULL_FILENAME = 'codebase.md';
+
+/**
+ * codebase-index.md 相对于普通 docs 类型的额外权重倍数。
+ */
+const CODEBASE_INDEX_WEIGHT_BOOST = 1.5;
+
+/**
  * Infer the content domain of a knowledge entry from four signals (priority order):
  * 1. Explicit `domain:` frontmatter field
  * 2. Tag keyword matching (TECHNICAL_TAGS / OPS_TAGS / SUPPORT_TAGS)
@@ -324,6 +340,17 @@ async function entryFromMdFile(
   type: KnowledgeType,
   voteCounts: Map<string, number>,
 ): Promise<SearchIndexEntry | null> {
+  // 若当前文件是全量 codebase.md，且同目录存在 codebase-index.md，则跳过以避免重复命中。
+  const basename = path.basename(absPath);
+  if (basename === CODEBASE_FULL_FILENAME) {
+    const dir = path.dirname(absPath);
+    const indexPath = path.join(dir, CODEBASE_INDEX_FILENAME);
+    if (await pathExists(indexPath)) {
+      log.debug(`Skipping ${absPath}: codebase-index.md exists in same directory`);
+      return null;
+    }
+  }
+
   let content = await readFileSafe(absPath);
   if (!content) return null;
 
@@ -638,6 +665,11 @@ export function search(
       const domainMultiplier = domainWeightRow[entry.domain ?? 'neutral'];
       const typeMultiplier = TYPE_BONUS[entry.type];
       score *= domainMultiplier * typeMultiplier;
+
+      // codebase-index.md 额外权重 boost，确保章节摘要优先于普通 docs 返回。
+      if (path.basename(entry.path ?? '') === CODEBASE_INDEX_FILENAME) {
+        score *= CODEBASE_INDEX_WEIGHT_BOOST;
+      }
 
       results.push({ entry, score });
     }
