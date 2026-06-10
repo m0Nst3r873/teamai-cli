@@ -584,4 +584,16 @@ program
     await importCmd({ ...globalOpts, ...cmdOpts });
   });
 
+program
+  .command('mr-hint')
+  .description('Hint AI about recently merged but un-imported MRs (SessionStart hook)')
+  .option('--stdin', 'Read hook data from STDIN')
+  .option('--tool <name>', 'Source AI tool (claude / codebuddy / cursor)')
+  .action(async (cmdOpts) => {
+    if (cmdOpts.stdin) {
+      const { mrHint } = await import('./mr-hint.js');
+      await mrHint();
+    }
+  });
+
 program.parse();
