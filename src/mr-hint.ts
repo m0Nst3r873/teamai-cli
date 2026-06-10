@@ -254,19 +254,75 @@ interface GhPR {
   mergedAt: string;
 }
 
+/** GitHub REST API pull request object (subset of fields used). */
+interface GitHubRestPR {
+  number: number;
+  title: string;
+  html_url: string;
+  merged_at: string | null;
+  pull_request?: { merged_at: string | null };
+}
+
 /**
- * List recently merged PRs from GitHub via `gh` CLI.
+ * Fetch merged PRs from the GitHub REST API.
+ *
+ * Used as fallback when `gh` CLI is unavailable. Supports public repos
+ * without a token; uses GITHUB_TOKEN env var when present to raise rate limits.
  *
  * @param owner  Repository owner
  * @param repo   Repository name
  * @param since  Include only PRs merged after this date
- * @returns      Array of MRSummary, empty when gh CLI unavailable or errors
+ * @returns      Array of MRSummary, empty on any error
+ */
+async function listGitHubMergedMRsViaREST(
+  owner: string,
+  repo: string,
+  since: Date,
+): Promise<MRSummary[]> {
+  const token = process.env['GITHUB_TOKEN'];
+  const headers: Record<string, string> = { 'User-Agent': 'teamai-cli', Accept: 'application/vnd.github+json' };
+  if (token) headers['Authorization'] = `Bearer ${token}`;
+
+  const url = `https://api.github.com/repos/${owner}/${repo}/pulls?state=closed&sort=updated&direction=desc&per_page=${MAX_MRS}`;
+  try {
+    const resp = await fetch(url, { headers, signal: AbortSignal.timeout(8000) });
+    if (!resp.ok) {
+      log.debug(`mr-hint: GitHub REST API returned ${resp.status}`);
+      return [];
+    }
+    const items = (await resp.json()) as GitHubRestPR[];
+    const sinceMs = since.getTime();
+    return items
+      .filter((pr) => pr.merged_at && new Date(pr.merged_at).getTime() >= sinceMs)
+      .map((pr) => ({
+        id: String(pr.number),
+        title: pr.title,
+        url: pr.html_url,
+        mergedAt: pr.merged_at!,
+      }));
+  } catch (err) {
+    log.debug(`mr-hint: GitHub REST API error: ${(err as Error).message}`);
+    return [];
+  }
+}
+
+/**
+ * List recently merged PRs from GitHub.
+ *
+ * Primary path: `gh pr list` CLI.
+ * Fallback: GitHub REST API (supports public repos without token).
+ *
+ * @param owner  Repository owner
+ * @param repo   Repository name
+ * @param since  Include only PRs merged after this date
+ * @returns      Array of MRSummary, empty when all paths fail
  */
 async function listGitHubMergedMRs(
   owner: string,
   repo: string,
   since: Date,
 ): Promise<MRSummary[]> {
+  // ── Primary: gh CLI ──────────────────────────────────────
   try {
     const result = spawnSync(
       'gh',
@@ -279,24 +335,25 @@ async function listGitHubMergedMRs(
       ],
       { encoding: 'utf-8', stdio: ['pipe', 'pipe', 'pipe'], timeout: 8000 },
     );
-    if (result.status !== 0 || !result.stdout.trim()) {
-      log.debug(`mr-hint: gh pr list failed (status=${result.status})`);
-      return [];
+    if (result.status === 0 && result.stdout.trim()) {
+      const items = JSON.parse(result.stdout) as GhPR[];
+      const sinceMs = since.getTime();
+      return items
+        .filter((pr) => pr.mergedAt && new Date(pr.mergedAt).getTime() >= sinceMs)
+        .map((pr) => ({
+          id: String(pr.number),
+          title: pr.title,
+          url: pr.url,
+          mergedAt: pr.mergedAt,
+        }));
     }
-    const items = JSON.parse(result.stdout) as GhPR[];
-    const sinceMs = since.getTime();
-    return items
-      .filter((pr) => pr.mergedAt && new Date(pr.mergedAt).getTime() >= sinceMs)
-      .map((pr) => ({
-        id: String(pr.number),
-        title: pr.title,
-        url: pr.url,
-        mergedAt: pr.mergedAt,
-      }));
+    log.debug(`mr-hint: gh pr list unavailable (status=${result.status}), falling back to REST API`);
   } catch (err) {
-    log.debug(`mr-hint: gh CLI error: ${(err as Error).message}`);
-    return [];
+    log.debug(`mr-hint: gh CLI error: ${(err as Error).message}, falling back to REST API`);
   }
+
+  // ── Fallback: GitHub REST API ────────────────────────────
+  return listGitHubMergedMRsViaREST(owner, repo, since);
 }
 
 // ─── Hint message builder ────────────────────────────────
