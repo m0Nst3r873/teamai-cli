@@ -11,6 +11,7 @@ import fs from 'fs-extra';
 
 import { IWikiClient } from './utils/iwiki-client.js';
 import type { IWikiDocument, IWikiPage } from './utils/iwiki-client.js';
+import { appendPendingReview } from './review-store.js';
 import { getTeamCodebasePaths } from './utils/team-codebase-paths.js';
 import { callClaude } from './utils/ai-client.js';
 import { log } from './utils/logger.js';
@@ -25,9 +26,6 @@ const DOWNLOAD_BATCH_SIZE = 5;
 
 /** 默认拉取最大页数。 */
 const DEFAULT_MAX_PAGES = 200;
-
-/** 待 review 队列文件名。 */
-const PENDING_REVIEW_FILE = '.teamai/pending-review.jsonl';
 
 /** 各章节的中文标题。 */
 const SECTION_TITLES: Record<string, string> = {
@@ -311,20 +309,16 @@ export async function importFromIWikiDual(opts: IWikiDualOptions): Promise<{
     // 8. 若启用 requireReview，写到 pending-review.jsonl
     if (opts.requireReview) {
         if (!opts.dryRun) {
-            const pendingPath = path.join(cwd, PENDING_REVIEW_FILE);
-            await fs.ensureDir(path.dirname(pendingPath));
+            const relativeFilePath = path.relative(cwd, filePath);
             for (const sectionKey of sections) {
                 const body = aiOutput[sectionKey] ?? '';
                 if (!body) continue;
-                const record = {
-                    ts: new Date().toISOString(),
-                    type: 'codebase-section',
-                    file: filePath,
-                    section: sectionKey,
+                await appendPendingReview(cwd, {
+                    kind: 'codebase-section',
+                    target: { file: relativeFilePath, section: sectionKey },
+                    payload: { content: body },
                     source,
-                    content: body,
-                };
-                await fs.appendFile(pendingPath, JSON.stringify(record) + '\n', 'utf8');
+                });
             }
         }
         return { sectionsUpdated: sections, pendingReview: true };

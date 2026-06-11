@@ -33,3 +33,11 @@
 - `docs/team-codebase/` — 各仓库 codebase 摘要及聚合索引
 - `.teamai/domains.yaml` — 域归属记录
 - `.teamai/domains.history.jsonl` — 域操作历史（含漂移检测记录）
+
+## codebase lint 示例（`codebase-lint.yml`）
+
+`codebase-lint.yml` 对 `docs/team-codebase/` 与 `.teamai/` 产物做全局一致性检查：
+
+- **触发条件**：PR 修改 codebase 相关文件时、每日 04:37 UTC 定时、手动触发
+- **检查内容**：锚点未闭合、孤儿 md、source 失效、计数不一致、stale 等 12 类问题
+- **退出码**：有 `high` 级问题时非零退出，可直接拦截 PR 合入；报告以 artifact 形式上传

@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module';
 import { Command } from 'commander';
-import { setVerbose, setSilent } from './utils/logger.js';
+import { setVerbose, setSilent, log } from './utils/logger.js';
 import type { GlobalOptions } from './types.js';
 
 const require = createRequire(import.meta.url);
@@ -615,5 +615,72 @@ program
       await mrHint();
     }
   });
+
+program
+  .command('codebase')
+  .description('Inspect and maintain team-codebase outputs')
+  .option('--lint', 'Run global consistency lint over docs/team-codebase')
+  .option('--fix', 'Apply low-risk mechanical fixes (only with --lint)')
+  .option('--severity <level>', 'Minimum severity to report: high|medium|low|info', 'info')
+  .option('--stale-days <n>', 'Threshold for sync-stale check', '60')
+  .option('--pending-review-threshold <n>', 'Threshold for pending-review backlog', '10')
+  .option('--json', 'Output report as JSON (suitable for CI)')
+  .option('--output <path>', 'Custom team-codebase root (mirrors --from-repo)')
+  .action(async (cmdOpts) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { codebaseCmd } = await import('./codebase-cmd.js');
+    await codebaseCmd({ ...globalOpts, ...cmdOpts });
+  });
+
+program
+  .command('cache')
+  .description('Inspect and clean ~/.teamai/cache/repos')
+  .option('--status', 'Print cache status (default action)')
+  .option('--gc', 'Run garbage collection')
+  .option('--max-bytes <n>', 'Override capacity cap for --gc')
+  .option('--stale-days <n>', 'Threshold for stale-eviction (default 30)', '30')
+  .option('--dry-run', 'Report actions without removing files')
+  .option('--json', 'Machine-readable output')
+  .action(async (cmdOpts) => {
+    const globalOpts = program.opts() as GlobalOptions;
+    const { cacheCmd } = await import('./cache-cmd.js');
+    await cacheCmd({ ...globalOpts, ...cmdOpts });
+  });
+
+program
+    .command('review [id]')
+    .description('Inspect and process .teamai/pending-review.jsonl items')
+    .option('--apply', 'Apply the change for the given id (only for codebase-section)')
+    .option('--reject', 'Reject the given id without applying')
+    .option('--reason <msg>', 'Reason for reject')
+    .option('--all-apply', 'Apply all items at or below --max-risk')
+    .option('--max-risk <level>', 'Risk ceiling for --all-apply: high|medium|low (default medium)', 'medium')
+    .option('--json', 'Machine-readable output')
+    .action(async (idArg, cmdOpts) => {
+        const globalOpts = program.opts() as GlobalOptions;
+        const { reviewCmd } = await import('./review-cmd.js');
+        await reviewCmd({ ...globalOpts, ...cmdOpts, idArg });
+    });
+
+program
+    .command('domains <subcommand> [repoUrl]')
+    .description('Inspect / accept / reject domain-drift signals (subcommand: drift)')
+    .option('--apply', 'Apply drift for the given repoUrl')
+    .option('--apply-all', 'Apply all drift items above confidence threshold')
+    .option('--threshold <n>', 'Confidence threshold for --apply-all (default 0.8)', '0.8')
+    .option('--lock', 'Lock the repo against future drift signals')
+    .option('--output <path>', 'Custom team-codebase root (mirrors --from-repo)')
+    .option('--skip-aggregate', 'Skip regenerateAggregate after apply')
+    .option('--json', 'Machine-readable output')
+    .action(async (subcommand, repoUrlArg, cmdOpts) => {
+        if (subcommand !== 'drift') {
+            log.error(`Unknown subcommand: ${subcommand}（仅支持 drift）`);
+            process.exitCode = 2;
+            return;
+        }
+        const globalOpts = program.opts() as GlobalOptions;
+        const { driftCmd } = await import('./drift-cmd.js');
+        await driftCmd({ ...globalOpts, ...cmdOpts, repoUrlArg });
+    });
 
 program.parse();
