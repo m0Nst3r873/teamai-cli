@@ -24,10 +24,26 @@ vi.mock('../utils/iwiki-client.js', () => ({
     })),
 }));
 
+vi.mock('../review-store.js', async (importOriginal) => {
+    const actual = await importOriginal<typeof import('../review-store.js')>();
+    return {
+        ...actual,
+        appendPendingReview: vi.fn().mockImplementation(
+            async (_cwd: string, partial: Record<string, unknown>) => ({
+                id: 'mockedid00001',
+                ts: new Date().toISOString(),
+                ...partial,
+                risk: 'medium',
+            }),
+        ),
+    };
+});
+
 // ─── Imports (after mocks) ───────────────────────────────
 
 import { importFromIWikiDual } from '../iwiki-dual.js';
 import { callClaude } from '../utils/ai-client.js';
+import { appendPendingReview } from '../review-store.js';
 
 // ─── 辅助 ────────────────────────────────────────────────
 
@@ -117,7 +133,7 @@ describe('importFromIWikiDual', () => {
         expect(await fs.pathExists(filePath)).toBe(false);
     });
 
-    it('requireReview=true → 落到 pending-review.jsonl 且不动 external-knowledge.md', async () => {
+    it('requireReview=true → 调 appendPendingReview 且不动 external-knowledge.md', async () => {
         (callClaude as ReturnType<typeof vi.fn>).mockResolvedValue(VALID_AI_OUTPUT);
 
         const result = await importFromIWikiDual({
@@ -132,14 +148,13 @@ describe('importFromIWikiDual', () => {
         const filePath = path.join(cwd, 'docs/team-codebase/external-knowledge.md');
         expect(await fs.pathExists(filePath)).toBe(false);
 
-        // pending-review.jsonl 应存在且含记录
-        const pendingPath = path.join(cwd, '.teamai/pending-review.jsonl');
-        expect(await fs.pathExists(pendingPath)).toBe(true);
-        const lines = (await fs.readFile(pendingPath, 'utf8'))
-            .split('\n')
-            .filter((l) => l.trim());
-        expect(lines.length).toBeGreaterThan(0);
-        const record = JSON.parse(lines[0]) as { type: string; section: string };
-        expect(record.type).toBe('codebase-section');
+        // appendPendingReview 应被调用（每个章节一次）
+        expect(appendPendingReview).toHaveBeenCalled();
+        const firstCall = (appendPendingReview as ReturnType<typeof vi.fn>).mock.calls[0][1] as {
+            kind: string;
+            payload: { content: string };
+        };
+        expect(firstCall.kind).toBe('codebase-section');
+        expect(typeof firstCall.payload.content).toBe('string');
     });
 });

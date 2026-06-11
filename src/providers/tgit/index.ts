@@ -11,8 +11,8 @@ import {
   gfGetOAuthToken,
   RepoNotFoundError as GfRepoNotFoundError,
 } from './gf-cli.js';
+import { gfListOrgRepos } from './gf-org.js';
 import { parseTGitRepoInput } from './repo-url.js';
-import { log } from '../../utils/logger.js';
 
 export class TGitProvider implements GitProvider {
   readonly name = 'tgit';
@@ -68,10 +68,8 @@ export class TGitProvider implements GitProvider {
     return 'tencent.com';
   }
 
-  // eslint-disable-next-line @typescript-eslint/no-unused-vars
-  async listOrgRepos(_org: string, _opts?: { maxRepos?: number }): Promise<OrgRepoInfo[]> {
-    log.warn('TGit listOrgRepos not yet supported');
-    throw new Error('TGit listOrgRepos not yet supported');
+  async listOrgRepos(org: string, opts?: { maxRepos?: number }): Promise<OrgRepoInfo[]> {
+    return gfListOrgRepos(org, opts);
   }
 }
 

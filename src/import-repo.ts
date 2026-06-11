@@ -3,8 +3,10 @@ import fs from 'fs-extra';
 import chalk from 'chalk';
 
 import { generateCodebaseMd } from './codebase.js';
+import { mergeWithAnchors } from './section-patcher.js';
 import { detectProvider } from './providers/registry.js';
 import { shallowClone, shallowFetch } from './clone.js';
+import { appendPendingReview, loadPendingReview, removePendingReview } from './review-store.js';
 import {
     getRepoCacheDir,
     getRepoSlug,
@@ -12,6 +14,7 @@ import {
     readLastSync,
     ensureCacheRoot,
 } from './utils/repo-cache.js';
+import { touchCacheEntry } from './utils/cache-index.js';
 import {
     loadDomains,
     saveDomains,
@@ -349,6 +352,38 @@ export async function detectDomainDrift(args: {
             `（推荐域 ${recommendResult.domain}，confidence ${recommendResult.confidence.toFixed(2)}），` +
             `已记入 history。请人工 review，自动归属未变。`,
         );
+
+        // 写 pending-review（24h 去重：移除同 url 的旧 drift 项）
+        try {
+            const existing = await loadPendingReview(cwd);
+            const cutoffMs = Date.now() - 24 * 3600 * 1000;
+            for (const existingItem of existing) {
+                if (existingItem.kind !== 'domain-drift') continue;
+                const itemUrl = String(existingItem.payload['url'] ?? '');
+                if (itemUrl !== url) continue;
+                const itemMs = Date.parse(existingItem.ts);
+                if (Number.isFinite(itemMs) && itemMs >= cutoffMs) {
+                    await removePendingReview(cwd, existingItem.id);
+                }
+            }
+            await appendPendingReview(cwd, {
+                kind: 'domain-drift',
+                target: { file: '.teamai/domains.yaml' },
+                payload: {
+                    url,
+                    oldDomain: currentDomain,
+                    newRecommendedDomain: recommendResult.domain,
+                    oldConfidence: currentConfidence,
+                    newConfidence: recommendResult.confidence,
+                    signal: recommendResult.signal,
+                    oldSha,
+                    newSha,
+                },
+                source: 'drift-detector',
+            });
+        } catch (err) {
+            log.debug(`[drift] 写入 pending-review 失败：${err instanceof Error ? err.message : String(err)}`);
+        }
     } catch (err) {
         log.debug(`[drift] 域漂移检测失败（不影响主流程）：${String(err)}`);
     }
@@ -466,15 +501,65 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
     const outputRoot = output ?? path.join(process.cwd(), 'docs', 'team-codebase');
     const repoMdPath = path.join(outputRoot, 'repos', `${slug}.md`);
 
+    // 章节级 diff + 锚点合并
+    const sourceTag = `${url}@${cloneSha.slice(0, 8)}`;
+    const syncedAt = new Date().toISOString();
+
+    let oldFile: string | null = null;
+    if (await fs.pathExists(repoMdPath)) {
+        try {
+            oldFile = await fs.readFile(repoMdPath, 'utf8');
+        } catch {
+            oldFile = null;
+        }
+    }
+
+    let merged: ReturnType<typeof mergeWithAnchors>;
+    try {
+        merged = mergeWithAnchors(oldFile, codebaseMd, { source: sourceTag, syncedAt });
+    } catch (err) {
+        log.warn(`[section-merge] ${err instanceof Error ? err.message : err}；fallback 到全量重写`);
+        merged = mergeWithAnchors(null, codebaseMd, { source: sourceTag, syncedAt });
+    }
+    const toWrite = merged.mergedMd;
+
     if (dryRun) {
         console.log(chalk.yellow(`[dry-run] 产物路径: ${repoMdPath}`));
         console.log(chalk.yellow('[dry-run] 产物预览（前 50 行）：'));
-        const preview = codebaseMd.split('\n').slice(0, 50).join('\n');
+        const preview = toWrite.split('\n').slice(0, 50).join('\n');
         console.log(preview);
+        if (merged.changedSlugs.length > 0) {
+            console.log(chalk.yellow(`[dry-run] 变化章节: ${merged.changedSlugs.join(', ')}`));
+        }
+        if (merged.addedSlugs.length > 0) {
+            console.log(chalk.yellow(`[dry-run] 新增章节: ${merged.addedSlugs.join(', ')}`));
+        }
+        if (merged.removedSlugs.length > 0) {
+            console.log(chalk.yellow(`[dry-run] 移除章节: ${merged.removedSlugs.join(', ')}`));
+        }
     } else {
         await fs.ensureDir(path.dirname(repoMdPath));
-        await fs.writeFile(repoMdPath, codebaseMd, 'utf8');
-        log.info(`产物已写入: ${repoMdPath}`);
+        const noChange =
+            merged.changedSlugs.length === 0 &&
+            merged.addedSlugs.length === 0 &&
+            merged.removedSlugs.length === 0 &&
+            oldFile !== null &&
+            oldFile === toWrite;
+        if (noChange) {
+            log.info(`[section-merge] 仓库 ${repoName} 无章节变化，跳过写入`);
+        } else {
+            await fs.writeFile(repoMdPath, toWrite, 'utf8');
+            log.info(`产物已写入: ${repoMdPath}`);
+            if (merged.changedSlugs.length > 0) {
+                log.debug(`[section-merge] 变化章节: ${merged.changedSlugs.join(', ')}`);
+            }
+            if (merged.addedSlugs.length > 0) {
+                log.debug(`[section-merge] 新增章节: ${merged.addedSlugs.join(', ')}`);
+            }
+            if (merged.removedSlugs.length > 0) {
+                log.debug(`[section-merge] 移除章节: ${merged.removedSlugs.join(', ')}`);
+            }
+        }
     }
 
     // 5. 业务域推荐
@@ -498,6 +583,11 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
         // 已在域中：更新 LAST_SYNC 后直接返回
         await writeLastSync(cacheDir, cloneSha);
         log.info(`LAST_SYNC 已更新: ${cloneSha.slice(0, 8)}`);
+        try {
+            await touchCacheEntry({ provider: providerName, owner, repo: repoName, lastSyncedSha: cloneSha });
+        } catch (touchErr) {
+            log.debug(`[cache-index] touchCacheEntry 失败（不阻塞主流程）: ${String(touchErr)}`);
+        }
         log.info(chalk.green(`✓ 仓库 ${owner}/${repoName} 增量同步完成`));
         return;
     }
@@ -610,6 +700,11 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
         // 7. 写 LAST_SYNC
         await writeLastSync(cacheDir, cloneSha);
         log.info(`LAST_SYNC 已更新: ${cloneSha.slice(0, 8)}`);
+        try {
+            await touchCacheEntry({ provider: providerName, owner, repo: repoName, lastSyncedSha: cloneSha });
+        } catch (touchErr) {
+            log.debug(`[cache-index] touchCacheEntry 失败（不阻塞主流程）: ${String(touchErr)}`);
+        }
     } else {
         console.log(chalk.yellow(`[dry-run] 域推荐结果: 归入「${finalDomainName}」(confidence=${confidence.toFixed(2)})`));
         console.log(chalk.yellow('[dry-run] 跳过写盘（domains.yaml / LAST_SYNC）'));
