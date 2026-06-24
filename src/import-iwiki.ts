@@ -214,17 +214,8 @@ export async function importFromIWiki(opts: {
 
   // 11. 自动推送所有产物到团队仓库
   if (!opts.dryRun) {
-    try {
-      const { pushRepoDirectly } = await import('./utils/git.js');
-      await pushRepoDirectly(
-        repoPath,
-        `[teamai] Import from iWiki: ${documents.map(d => d.title).slice(0, 3).join(', ')}`,
-        ['.'],
-      );
-      log.success('已推送到团队仓库');
-    } catch (err) {
-      log.debug(`[push] 自动推送失败（可手动 teamai push）: ${err instanceof Error ? err.message : err}`);
-    }
+    const { autoPushTeamRepo } = await import('./utils/git.js');
+    await autoPushTeamRepo(repoPath, `[teamai] Import from iWiki: ${documents.map(d => d.title).slice(0, 3).join(', ')}`);
   }
 
   log.success('iWiki 导入完成');

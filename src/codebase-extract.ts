@@ -18,6 +18,7 @@ import {
   detectCodeIncrementalChanges,
 } from './wiki-engine/adapters/index.js';
 import type { CodeFact, CodeGraphIndex } from './wiki-engine/adapters/index.js';
+import { routerTemplate, indexTemplate, HOT_TEMPLATE } from './wiki-engine/adapters/templates.js';
 
 export interface ExtractCodebaseOptions {
   path?: string;
@@ -282,41 +283,10 @@ export async function extractCodebase(opts: ExtractCodebaseOptions): Promise<voi
   );
 
   // 生成 team-wiki 标准入口文件
-  const routerMd = [
-    '# Team Wiki Router',
-    '',
-    'Route broad questions to the relevant domain entrypoint.',
-    '',
-    `- [[code/${project}/index]] — ${project} 代码知识`,
-    '',
-  ].join('\n');
-  await writeFile(path.join(wikiRoot, 'router.md'), routerMd, 'utf-8');
-
-  const hotMd = [
-    '# Hot Context',
-    '',
-    'Keep only active working memory here: current focus, recent decisions, open questions.',
-    'Move durable conclusions into domain pages.',
-    '',
-  ].join('\n');
-  await writeFile(path.join(wikiRoot, 'hot.md'), hotMd, 'utf-8');
-
-  const wikiIndexMd = [
-    '# Team Wiki Index',
-    '',
-    `Last updated: ${new Date().toISOString()}`,
-    '',
-    '## Domains',
-    '',
-    `- [${project}](./evidence/code/${project}/index.md) — 代码知识图谱`,
-    '',
-    '## Navigation',
-    '',
-    '- [router.md](./router.md) — 领域路由入口',
-    '- [hot.md](./hot.md) — 活跃工作记忆',
-    '',
-  ].join('\n');
-  await writeFile(path.join(wikiRoot, 'index.md'), wikiIndexMd, 'utf-8');
+  const proj = [{ slug: project, label: project }];
+  await writeFile(path.join(wikiRoot, 'router.md'), routerTemplate(proj), 'utf-8');
+  await writeFile(path.join(wikiRoot, 'hot.md'), HOT_TEMPLATE, 'utf-8');
+  await writeFile(path.join(wikiRoot, 'index.md'), indexTemplate(proj), 'utf-8');
 
   // 生成 gaps/ — 知识缺口追踪
   const gaps = detectKnowledgeGaps(facts, graph, files);

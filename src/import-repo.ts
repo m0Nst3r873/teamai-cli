@@ -716,32 +716,33 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
                 await fs.remove(cacheWiki);
             }
             // 更新顶层 router.md 和 index.md（追加新项目，不覆盖）
+            const { routerTemplate, indexTemplate, HOT_TEMPLATE } = await import('./wiki-engine/adapters/templates.js');
             const routerPath = path.join(teamwikiRoot, 'router.md');
             const indexPath = path.join(teamwikiRoot, 'index.md');
             const projectLink = `[[code/${slug}/index]]`;
             if (await fs.pathExists(routerPath)) {
                 const router = await fs.readFile(routerPath, 'utf8');
                 if (!router.includes(projectLink)) {
-                    await fs.writeFile(routerPath, router.trimEnd() + `\n- ${projectLink} — ${slug} 代码知识\n`, 'utf8');
+                    const line = `- ${projectLink} — ${slug} 代码知识\n`;
+                    await fs.writeFile(routerPath, router.trimEnd() + '\n' + line, 'utf8');
                 }
             } else {
-                await fs.writeFile(routerPath, `# Team Wiki Router\n\nRoute broad questions to the relevant domain entrypoint.\n\n- ${projectLink} — ${slug} 代码知识\n`, 'utf8');
+                await fs.writeFile(routerPath, routerTemplate([{ slug, label: slug }]), 'utf8');
             }
             if (await fs.pathExists(indexPath)) {
                 const idx = await fs.readFile(indexPath, 'utf8');
-                if (!idx.includes(`${slug}`)) {
+                if (!idx.includes(slug)) {
                     const insertPoint = idx.indexOf('## Navigation');
                     if (insertPoint > 0) {
-                        const before = idx.slice(0, insertPoint);
-                        const after = idx.slice(insertPoint);
-                        await fs.writeFile(indexPath, before + `- [${slug}](./evidence/code/${slug}/index.md) — 代码知识图谱\n\n` + after, 'utf8');
+                        const entry = `- [${slug}](./evidence/code/${slug}/index.md) — 代码知识图谱\n\n`;
+                        await fs.writeFile(indexPath, idx.slice(0, insertPoint) + entry + idx.slice(insertPoint), 'utf8');
                     }
                 }
             } else {
-                await fs.writeFile(indexPath, `# Team Wiki Index\n\nLast updated: ${new Date().toISOString()}\n\n## Domains\n\n- [${slug}](./evidence/code/${slug}/index.md) — 代码知识图谱\n\n## Navigation\n\n- [router.md](./router.md) — 领域路由入口\n- [hot.md](./hot.md) — 活跃工作记忆\n`, 'utf8');
+                await fs.writeFile(indexPath, indexTemplate([{ slug, label: slug }]), 'utf8');
             }
             if (!await fs.pathExists(path.join(teamwikiRoot, 'hot.md'))) {
-                await fs.writeFile(path.join(teamwikiRoot, 'hot.md'), '# Hot Context\n\nKeep only active working memory here: current focus, recent decisions, open questions.\nMove durable conclusions into domain pages.\n', 'utf8');
+                await fs.writeFile(path.join(teamwikiRoot, 'hot.md'), HOT_TEMPLATE, 'utf8');
             }
 
             log.info(chalk.green(`✓ teamwiki/ 知识图谱已更新: ${slug}`));
@@ -946,19 +947,10 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
         } catch { /* 非关键路径 */ }
 
         // 9. 自动推送所有产物到团队仓库
-        try {
-            const { pushRepoDirectly } = await import('./utils/git.js');
-            const teamRepoPath = path.join(domainsBase, '.teamai', 'team-repo');
-            if (await fs.pathExists(teamRepoPath)) {
-                await pushRepoDirectly(
-                    teamRepoPath,
-                    `[teamai] Import codebase knowledge from ${owner}/${repoName}`,
-                    ['.'],
-                );
-                log.success('已推送到团队仓库');
-            }
-        } catch (err) {
-            log.debug(`[push] 自动推送失败（可手动 teamai push）: ${err instanceof Error ? err.message : err}`);
+        const teamRepoPath = path.join(domainsBase, '.teamai', 'team-repo');
+        if (await fs.pathExists(teamRepoPath)) {
+            const { autoPushTeamRepo } = await import('./utils/git.js');
+            await autoPushTeamRepo(teamRepoPath, `[teamai] Import codebase knowledge from ${owner}/${repoName}`);
         }
     }
 }

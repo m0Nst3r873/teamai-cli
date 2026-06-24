@@ -13,16 +13,7 @@ import { importFromOrg } from './import-org.js';
 import { importFromIWikiDual } from './iwiki-dual.js';
 import { GlobalOptions } from './types.js';
 import { log } from './utils/logger.js';
-import { pushRepoDirectly } from './utils/git.js';
-
-async function autoPushTeamRepo(repoPath: string, message: string): Promise<void> {
-  try {
-    await pushRepoDirectly(repoPath, message, ['.']);
-    log.success('已推送到团队仓库');
-  } catch (err) {
-    log.debug(`[push] 自动推送失败（可手动 teamai push）: ${err instanceof Error ? err.message : err}`);
-  }
-}
+import { autoPushTeamRepo } from './utils/git.js';
 
 /**
  * import 命令的扩展选项，合并全局选项与子命令专属选项。
