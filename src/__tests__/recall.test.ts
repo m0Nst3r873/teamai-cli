@@ -6,7 +6,7 @@ import YAML from 'yaml';
 import { autoUpvote } from '../recall.js';
 import { buildIndex, loadIndex, search } from '../utils/search-index.js';
 import type { SearchResult } from '../utils/search-index.js';
-import type { SearchIndex, UserVotes } from '../types.js';
+import type { SearchIndex, UserVotesV2 } from '../types.js';
 
 // ─── Test helpers ──────────────────────────────────────────
 
@@ -73,42 +73,35 @@ describe('autoUpvote', () => {
     };
   }
 
-  it('T12: creates new vote entry on first upvote', async () => {
+  it('T12: creates new vote entry on first upvote (v2 format)', async () => {
     const results = [makeResult('api-timeout-2026-03-20-abc.md')];
     await autoUpvote(results, 'jeff', repoPath);
 
-    // Check local votes file
     const localPath = path.join(tmpDir, '.teamai', 'votes', 'jeff.yaml');
     expect(fs.existsSync(localPath)).toBe(true);
 
     const content = fs.readFileSync(localPath, 'utf-8');
-    const parsed = YAML.parse(content) as UserVotes;
+    const parsed = YAML.parse(content) as UserVotesV2;
+    expect(parsed.version).toBe(2);
     expect(parsed.votes['api-timeout-2026-03-20-abc']).toBeDefined();
-    expect(parsed.votes['api-timeout-2026-03-20-abc'].at).toBeTruthy();
+    expect(parsed.votes['api-timeout-2026-03-20-abc'].recalled_count).toBe(1);
+    expect(parsed.votes['api-timeout-2026-03-20-abc'].last_recalled_at).toBeTruthy();
 
-    // Repo votes dir should NOT have the file — votes are only written
-    // to the repo by reportUsageToTeam() during `teamai pull`.
     const repoVotePath = path.join(repoPath, 'votes', 'jeff.yaml');
     expect(fs.existsSync(repoVotePath)).toBe(false);
   });
 
-  it('T13: idempotent — duplicate vote does not change file', async () => {
+  it('T13: increments recalled_count on repeated recalls', async () => {
     const results = [makeResult('api-timeout-2026-03-20-abc.md')];
 
-    // First vote
     await autoUpvote(results, 'jeff', repoPath);
+    await autoUpvote(results, 'jeff', repoPath);
+
     const localPath = path.join(tmpDir, '.teamai', 'votes', 'jeff.yaml');
-    const firstContent = fs.readFileSync(localPath, 'utf-8');
-    const firstParsed = YAML.parse(firstContent) as UserVotes;
-    const firstTimestamp = firstParsed.votes['api-timeout-2026-03-20-abc'].at;
-
-    // Second vote (same doc)
-    await autoUpvote(results, 'jeff', repoPath);
-    const secondContent = fs.readFileSync(localPath, 'utf-8');
-    const secondParsed = YAML.parse(secondContent) as UserVotes;
-
-    // Timestamp should NOT have changed (idempotent)
-    expect(secondParsed.votes['api-timeout-2026-03-20-abc'].at).toBe(firstTimestamp);
+    const content = fs.readFileSync(localPath, 'utf-8');
+    const parsed = YAML.parse(content) as UserVotesV2;
+    expect(parsed.votes['api-timeout-2026-03-20-abc'].recalled_count).toBe(2);
+    expect(parsed.deltas['api-timeout-2026-03-20-abc'].recalled_delta).toBe(2);
   });
 
   it('accumulates votes for different docs', async () => {
@@ -117,10 +110,11 @@ describe('autoUpvote', () => {
 
     const localPath = path.join(tmpDir, '.teamai', 'votes', 'jeff.yaml');
     const content = fs.readFileSync(localPath, 'utf-8');
-    const parsed = YAML.parse(content) as UserVotes;
+    const parsed = YAML.parse(content) as UserVotesV2;
+    expect(parsed.version).toBe(2);
     expect(Object.keys(parsed.votes)).toHaveLength(2);
-    expect(parsed.votes['doc-a']).toBeDefined();
-    expect(parsed.votes['doc-b']).toBeDefined();
+    expect(parsed.votes['doc-a'].recalled_count).toBe(1);
+    expect(parsed.votes['doc-b'].recalled_count).toBe(1);
   });
 
   it('handles empty results gracefully', async () => {
@@ -138,8 +132,9 @@ describe('autoUpvote', () => {
     await autoUpvote(results, 'jeff', repoPath);
 
     const content = fs.readFileSync(path.join(localDir, 'jeff.yaml'), 'utf-8');
-    const parsed = YAML.parse(content) as UserVotes;
+    const parsed = YAML.parse(content) as UserVotesV2;
     expect(parsed.votes['new-doc']).toBeDefined();
+    expect(parsed.votes['new-doc'].recalled_count).toBe(1);
   });
 });
 

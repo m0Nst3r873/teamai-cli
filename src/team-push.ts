@@ -3,10 +3,9 @@ import path from 'node:path';
 import { readUsageEvents, truncateUsageAfterReport } from './usage-tracker.js';
 import { aggregateUsage } from './stats.js';
 import { createGit, pushRepoDirectly, pullRepo, resetToCleanMaster } from './utils/git.js';
-import { writeFile, readFileSafe, ensureDir, pathExists, listFiles } from './utils/fs.js';
+import { writeFile, readFileSafe, ensureDir } from './utils/fs.js';
 import { log } from './utils/logger.js';
 import type { UserStats } from './types.js';
-import { VOTES_LOCAL_DIR } from './types.js';
 
 // ─── Auto-report flow (during teamai pull) ─────────────
 //
@@ -127,22 +126,11 @@ export async function reportUsageToTeam(
 
     // Always stage pending local votes (independent of usage events)
     try {
-      if (await pathExists(VOTES_LOCAL_DIR)) {
-        const voteFiles = await listFiles(VOTES_LOCAL_DIR);
-        for (const vf of voteFiles) {
-          if (!vf.endsWith('.yaml') && !vf.endsWith('.yml')) continue;
-          const localVotePath = path.join(VOTES_LOCAL_DIR, vf);
-          const repoVotePath = path.join(repoPath, 'votes', vf);
-          const content = await readFileSafe(localVotePath);
-          if (content) {
-            await ensureDir(path.join(repoPath, 'votes'));
-            await writeFile(repoVotePath, content);
-            filesToPush.push(`votes/${vf}`);
-          }
-        }
-      }
+      const { syncVotesToTeam } = await import('./votes.js');
+      const votesLocalDir = `${process.env.HOME ?? ''}/.teamai/votes`;
+      await syncVotesToTeam(repoPath, username, votesLocalDir);
     } catch (e) {
-      log.error(`Vote staging skipped: ${(e as Error).message}`);
+      log.debug(`reportUsageToTeam: votes sync skipped: ${(e as Error).message}`);
     }
 
     // Nothing to push — skip commit

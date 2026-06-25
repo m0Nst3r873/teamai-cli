@@ -315,8 +315,15 @@ async function aggregateVotes(votesDir: string): Promise<Map<string, number>> {
 
     try {
       const YAML = (await import('yaml')).default;
-      const parsed = YAML.parse(content) as UserVotes | null;
-      if (parsed?.votes) {
+      const parsed = YAML.parse(content);
+      if (parsed?.version === 2 && parsed?.votes) {
+        for (const [docId, entry] of Object.entries(parsed.votes as Record<string, { recalled_count?: number; upvoted_count?: number }>)) {
+          const recalled = typeof entry.recalled_count === 'number' ? entry.recalled_count : 0;
+          const upvoted = typeof entry.upvoted_count === 'number' ? entry.upvoted_count : 0;
+          const score = recalled + upvoted * 3;
+          counts.set(docId, (counts.get(docId) ?? 0) + score);
+        }
+      } else if (parsed?.votes) {
         for (const docId of Object.keys(parsed.votes)) {
           counts.set(docId, (counts.get(docId) ?? 0) + 1);
         }
@@ -672,8 +679,7 @@ export function search(
     // Codebase docs (from team-codebase/) lack tags, so allow body-only matches for them.
     const isCodebaseDoc = entry.type === 'docs' && (entry.path ?? entry.filename ?? '').includes('team-codebase');
     if (score > 0 && (hasTitleOrTagMatch || isCodebaseDoc)) {
-      // Vote bonus: +0.5 per vote, max 5 points (unchanged).
-      score += Math.min(entry.votes * 0.5, 5);
+      score += Math.min(Math.log2((entry.votes || 0) + 1) * 1.5, 8);
 
       // Query-aware domain weight (改动 A) × type bonus (unchanged).
       // Missing domain degrades gracefully to 'neutral'.

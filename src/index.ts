@@ -535,7 +535,7 @@ program
 
 // ─── Recall commands ─────────────────────────────────────
 
-program
+const recallCmd = program
   .command('recall [query...]')
   .description('Search team learnings knowledge base')
   .option('--depth <level>', 'Recall depth for codebase: route / context / lookup', 'context')
@@ -544,6 +544,16 @@ program
     const query = (queryParts as string[]).join(' ');
     const { recall } = await import('./recall.js');
     await recall(query, { ...globalOpts, depth: cmdOpts.depth });
+  });
+
+recallCmd
+  .command('feedback')
+  .description('Manually vote on a knowledge document')
+  .option('--positive <docId>', 'Upvote: mark document as actually useful')
+  .option('--negative <docId>', 'Downvote: mark document as not helpful')
+  .action(async (cmdOpts: { positive?: string; negative?: string }) => {
+    const { recallFeedback } = await import('./votes.js');
+    await recallFeedback(cmdOpts);
   });
 
 program

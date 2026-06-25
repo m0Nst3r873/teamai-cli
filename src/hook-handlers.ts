@@ -9,8 +9,10 @@
  * remain unchanged for backward compatibility during migration.
  */
 
+import path from 'node:path';
 import type { HookHandler } from './hook-dispatch.js';
 import { deriveSessionId } from './utils/session-id.js';
+import { log } from './utils/logger.js';
 
 // ─── Public types ───────────────────────────────────────
 
@@ -147,18 +149,17 @@ const trackSlashHandler: HookHandler = {
 
 const contributeCheckHandler: HookHandler = {
   name: 'contribute-check',
-  async execute(stdin, _tool) {
+  async execute(stdin, tool) {
     const { contributeCheckForSession } = await import('./contribute-check.js');
+    const { formatStopHookOutput } = await import('./utils/hook-output.js');
 
-    // Derive session ID from STDIN
     const sessionId = typeof stdin.session_id === 'string' ? stdin.session_id : null;
     if (!sessionId) return null;
 
     const cwd = typeof stdin.cwd === 'string' ? stdin.cwd : undefined;
     const { hint } = await contributeCheckForSession(sessionId, cwd);
     if (hint) {
-      // Stop event format: { stopReason: "..." }
-      return JSON.stringify({ stopReason: hint });
+      return formatStopHookOutput(hint, tool);
     }
     return null;
   },
@@ -205,6 +206,42 @@ const mrHintHandler: HookHandler = {
   },
 };
 
+const VOTES_SYNC_TIMEOUT_MS = 8_000;
+
+const votesSyncHandler: HookHandler = {
+  name: 'votes-sync',
+  async execute(stdin, tool) {
+    const transcriptPath = typeof stdin.transcript_path === 'string' ? stdin.transcript_path : null;
+    if (!transcriptPath) return null;
+
+    const sessionId = typeof stdin.session_id === 'string' ? stdin.session_id : null;
+    if (!sessionId) return null;
+
+    try {
+      const { parseTranscriptForVotes } = await import('./transcript-parser.js');
+      const { incrementUpvoted, syncVotesToTeam } = await import('./votes.js');
+      const { requireInit } = await import('./config.js');
+
+      const voteData = await parseTranscriptForVotes(transcriptPath);
+      if (voteData.referencedDocIds.length === 0) return null;
+
+      const { localConfig } = await requireInit();
+      const votesDir = `${process.env.HOME ?? ''}/.teamai/votes`;
+      const votePath = path.join(votesDir, `${localConfig.username}.yaml`);
+
+      await incrementUpvoted(votePath, voteData.referencedDocIds);
+
+      await syncVotesToTeam(localConfig.repo.localPath, localConfig.username, votesDir).catch((e: Error) => {
+        log.debug(`votes-sync: push failed, will retry next session: ${e.message}`);
+      });
+    } catch (e) {
+      log.debug(`votes-sync: skipped: ${(e as Error).message}`);
+    }
+
+    return null;
+  },
+};
+
 // ─── Registry builder ───────────────────────────────────
 
 /**
@@ -222,6 +259,7 @@ export function buildHandlerRegistry(): HandlerRegistration[] {
     { event: 'stop', matcher: '*', handler: updateHandler, timeoutMs: UPDATE_TIMEOUT_MS },
     { event: 'stop', matcher: '*', handler: contributeCheckHandler, timeoutMs: CONTRIBUTE_CHECK_TIMEOUT_MS },
     { event: 'stop', matcher: '*', handler: dashboardReportHandler, timeoutMs: DASHBOARD_TIMEOUT_MS },
+    { event: 'stop', matcher: '*', handler: votesSyncHandler, timeoutMs: VOTES_SYNC_TIMEOUT_MS },
 
     // ─── PostToolUse ──────────────────────────────────
     { event: 'post-tool-use', matcher: '*', handler: dashboardReportHandler, timeoutMs: DASHBOARD_TIMEOUT_MS },
