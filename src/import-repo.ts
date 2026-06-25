@@ -780,7 +780,13 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
             domainsBase = lc.repo.localPath;
         } catch { /* fallback: cwd */ }
     }
-    const existingDomains = await loadDomains(domainsBase);
+    let existingDomains: DomainsFile;
+    try {
+        existingDomains = await loadDomains(domainsBase);
+    } catch {
+        // domains.yaml 可能不存在或格式不兼容（旧 http:// URL），跳过域推荐
+        return;
+    }
 
     // 修正产物路径：使用 domainsBase（team-repo）作为输出根
     if (!output && domainsBase !== cwd) {

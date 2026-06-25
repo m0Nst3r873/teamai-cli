@@ -384,8 +384,9 @@ export async function saveGraphIndex(wikiRoot: string, graph: GraphIndex): Promi
  */
 export function mergeGraphs(base: GraphIndex, overlay: GraphIndex): GraphIndex {
   const nodeMap = new Map<string, GraphNode>();
-  for (const n of base.nodes) nodeMap.set(n.slug, n);
-  for (const n of overlay.nodes) nodeMap.set(n.slug, n); // overlay wins
+  const nodeKey = (n: GraphNode) => n.slug ?? (n as unknown as { id?: string }).id ?? `${n.title}:${n.type}`;
+  for (const n of base.nodes) nodeMap.set(nodeKey(n), n);
+  for (const n of overlay.nodes) nodeMap.set(nodeKey(n), n); // overlay wins
 
   const edgeKey = (e: GraphEdge) => `${e.from}|${e.to}|${e.relation}`;
   const edgeMap = new Map<string, GraphEdge>();
