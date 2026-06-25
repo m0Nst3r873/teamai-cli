@@ -3,6 +3,7 @@ import fs from 'fs-extra';
 import chalk from 'chalk';
 
 import { generateCodebaseMd } from './codebase.js';
+import { extractCodebase } from './codebase-extract.js';
 import { mergeWithAnchors } from './section-patcher.js';
 import { detectProvider } from './providers/registry.js';
 import { shallowClone, shallowFetch } from './clone.js';
@@ -53,6 +54,87 @@ export interface ImportFromRepoOptions {
     interactive?: boolean;
     /** 增量模式：缓存命中时仅 fetch+reset，未命中时 fallback 到全量 clone */
     incremental?: boolean;
+}
+
+// ─── Cross-Repo Edge Detection ─────────────────────────
+
+interface SimpleGraphIndex {
+    nodes: Array<{ id: string; kind: string; label: string; file: string }>;
+    edges: Array<{ from: string; to: string; relation: string }>;
+}
+
+/**
+ * 检测跨仓库依赖关系。
+ *
+ * 通过比较两个图谱的节点标签（组件名/接口名），
+ * 当仓库 A 有一个节点名称与仓库 B 的节点名称匹配时，
+ * 说明两者可能存在依赖关系（如共享接口、同名组件引用）。
+ *
+ * 基于 team-wiki 的 buildCodeGraphIndex 中 exportIndex 匹配思想。
+ */
+function detectCrossRepoEdges(
+    overlay: SimpleGraphIndex,
+    existing: SimpleGraphIndex,
+    _newProject: string,
+): Array<{ from: string; to: string; relation: string }> {
+    const crossEdges: Array<{ from: string; to: string; relation: string }> = [];
+    const edgeSet = new Set<string>();
+
+    // 建立已有图谱的组件/接口名索引
+    const existingIndex = new Map<string, string>();
+    for (const node of existing.nodes) {
+        existingIndex.set(node.label.toLowerCase(), node.id);
+    }
+
+    // 建立新图谱的组件/接口名索引
+    const overlayIndex = new Map<string, string>();
+    for (const node of overlay.nodes) {
+        overlayIndex.set(node.label.toLowerCase(), node.id);
+    }
+
+    // 检查新仓库的 import 边目标是否有同名组件在已有仓库中
+    for (const edge of overlay.edges) {
+        if (edge.relation !== 'imports') continue;
+        // 从 edge.to 文件路径提取可能的模块名
+        const segments = edge.to.split('/');
+        const fileName = segments[segments.length - 1]?.replace(/\.(ts|tsx|js|jsx|py|go|rs|java)$/, '') ?? '';
+        // 将 kebab-case 转为 PascalCase 来匹配类名
+        const pascalName = fileName.split(/[-_]/).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('');
+
+        const match = existingIndex.get(pascalName.toLowerCase());
+        if (match) {
+            const fromNode = overlay.nodes.find(n => n.file === edge.from);
+            if (fromNode) {
+                const key = `${fromNode.id}|${match}`;
+                if (!edgeSet.has(key)) {
+                    edgeSet.add(key);
+                    crossEdges.push({ from: fromNode.id, to: match, relation: 'DEPENDS_ON' });
+                }
+            }
+        }
+    }
+
+    // 反向：已有图谱的 import 边是否指向新仓库中的同名组件
+    for (const edge of existing.edges) {
+        if (edge.relation !== 'imports') continue;
+        const segments = edge.to.split('/');
+        const fileName = segments[segments.length - 1]?.replace(/\.(ts|tsx|js|jsx|py|go|rs|java)$/, '') ?? '';
+        const pascalName = fileName.split(/[-_]/).map(s => s.charAt(0).toUpperCase() + s.slice(1)).join('');
+
+        const match = overlayIndex.get(pascalName.toLowerCase());
+        if (match) {
+            const fromNode = existing.nodes.find(n => n.file === edge.from);
+            if (fromNode) {
+                const key = `${fromNode.id}|${match}`;
+                if (!edgeSet.has(key)) {
+                    edgeSet.add(key);
+                    crossEdges.push({ from: fromNode.id, to: match, relation: 'DEPENDS_ON' });
+                }
+            }
+        }
+    }
+
+    return crossEdges;
 }
 
 // ─── Helpers ────────────────────────────────────────────
@@ -598,7 +680,92 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
         }
     }
 
-    // 5. 业务域推荐
+    // 4b. 生成 teamwiki/ 知识图谱产物（写入 team-repo 以便自动 push）
+    const teamRepoDir = path.join(process.cwd(), '.teamai', 'team-repo');
+    const teamwikiRoot = output
+        ? path.resolve(output, '..', 'teamwiki')
+        : path.join(teamRepoDir, 'teamwiki');
+    if (!dryRun) {
+        const cacheWiki = path.join(cacheDir, 'teamwiki');
+        try {
+            await extractCodebase({ path: cacheDir, project: slug, json: false });
+            // 将产物从 cacheDir/teamwiki/ 移动到目标 teamwikiRoot
+            if (await fs.pathExists(cacheWiki)) {
+                const evidenceSrc = path.join(cacheWiki, 'evidence', 'code', slug);
+                const evidenceDest = path.join(teamwikiRoot, 'evidence', 'code', slug);
+                await fs.ensureDir(evidenceDest);
+                await fs.copy(evidenceSrc, evidenceDest, { overwrite: true });
+                // 合并 graph-index
+                const srcGraph = path.join(cacheWiki, '.indices', 'graph-index.json');
+                const destGraph = path.join(teamwikiRoot, '.indices', 'graph-index.json');
+                await fs.ensureDir(path.join(teamwikiRoot, '.indices'));
+                if (await fs.pathExists(destGraph)) {
+                    const { mergeGraphs } = await import('./wiki-engine/adapters/index.js');
+                    const existing = JSON.parse(await fs.readFile(destGraph, 'utf8'));
+                    const overlay = JSON.parse(await fs.readFile(srcGraph, 'utf8'));
+                    const merged2 = mergeGraphs(existing, overlay);
+                    // 跨仓关系检测：检查新仓库的 relation facts 是否引用了已有仓库的文件/包
+                    const crossRepoEdges = detectCrossRepoEdges(overlay, existing, slug);
+                    if (crossRepoEdges.length > 0) {
+                        (merged2 as { edges: Array<{ from: string; to: string; relation: string }> }).edges.push(...crossRepoEdges);
+                        log.debug(`[wiki-engine] 检测到 ${crossRepoEdges.length} 条跨仓关系`);
+                    }
+                    await fs.writeFile(destGraph, JSON.stringify(merged2, null, 2), 'utf8');
+                } else {
+                    await fs.copy(srcGraph, destGraph);
+                }
+                await fs.remove(cacheWiki);
+            }
+            // 更新顶层 router.md 和 index.md（追加新项目，不覆盖）
+            const { routerTemplate, indexTemplate, HOT_TEMPLATE } = await import('./wiki-engine/adapters/templates.js');
+            const routerPath = path.join(teamwikiRoot, 'router.md');
+            const indexPath = path.join(teamwikiRoot, 'index.md');
+            const projectLink = `[[code/${slug}/index]]`;
+            if (await fs.pathExists(routerPath)) {
+                const router = await fs.readFile(routerPath, 'utf8');
+                if (!router.includes(projectLink)) {
+                    const line = `- ${projectLink} — ${slug} 代码知识\n`;
+                    await fs.writeFile(routerPath, router.trimEnd() + '\n' + line, 'utf8');
+                }
+            } else {
+                await fs.writeFile(routerPath, routerTemplate([{ slug, label: slug }]), 'utf8');
+            }
+            if (await fs.pathExists(indexPath)) {
+                const idx = await fs.readFile(indexPath, 'utf8');
+                if (!idx.includes(slug)) {
+                    const insertPoint = idx.indexOf('## Navigation');
+                    if (insertPoint > 0) {
+                        const entry = `- [${slug}](./evidence/code/${slug}/index.md) — 代码知识图谱\n\n`;
+                        await fs.writeFile(indexPath, idx.slice(0, insertPoint) + entry + idx.slice(insertPoint), 'utf8');
+                    }
+                }
+            } else {
+                await fs.writeFile(indexPath, indexTemplate([{ slug, label: slug }]), 'utf8');
+            }
+            if (!await fs.pathExists(path.join(teamwikiRoot, 'hot.md'))) {
+                await fs.writeFile(path.join(teamwikiRoot, 'hot.md'), HOT_TEMPLATE, 'utf8');
+            }
+
+            log.info(chalk.green(`✓ teamwiki/ 知识图谱已更新: ${slug}`));
+        } catch (err) {
+            log.debug(`[wiki-engine] 图谱生成失败（非阻塞）: ${err instanceof Error ? err.message : err}`);
+        } finally {
+            await fs.remove(cacheWiki).catch(() => {});
+        }
+    }
+
+    // 5. 自动推送所有产物到团队仓库
+    if (!dryRun) {
+        const pushTarget = path.join(process.cwd(), '.teamai', 'team-repo');
+        if (await fs.pathExists(pushTarget)) {
+            const { autoPushTeamRepo } = await import('./utils/git.js');
+            await autoPushTeamRepo(pushTarget, `[teamai] Import codebase knowledge from ${owner}/${repoName}`);
+        }
+    }
+
+    log.info(chalk.green(`✓ 仓库 ${owner}/${repoName} 导入完成`));
+
+    // 5-legacy. 业务域推荐（旧 docs/team-codebase 体系，保留兼容）
     const cwd = process.cwd();
     // 当无 --output 时，domains.yaml 写入团队仓库（共享），否则写入 cwd
     let domainsBase = cwd;
@@ -777,7 +944,6 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
         console.log(chalk.yellow('[dry-run] 跳过写盘（domains.yaml / LAST_SYNC）'));
     }
 
-    log.info(chalk.green(`✓ 仓库 ${owner}/${repoName} 导入完成`));
 
     // 8. 更新聚合文件（domain-*.md + index.md）
     if (!dryRun) {
@@ -790,5 +956,7 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
             await regenerateAggregate({ paths: aggPaths, domains: freshDomains });
             log.info(`聚合文件已更新`);
         } catch { /* 非关键路径 */ }
+
+        // push 已在步骤 5 执行，此处不再重复
     }
 }
