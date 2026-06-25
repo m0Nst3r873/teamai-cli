@@ -581,57 +581,43 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
         return;
     }
 
-    // 3. 扫描生成 codebase.md
+    // 3. 扫描生成 codebase.md（AI 扫描失败不阻断后续图谱提取）
     log.info(`扫描仓库内容...`);
-    let codebaseMd: string;
+    let codebaseMd: string | undefined;
     try {
         codebaseMd = await generateCodebaseMd({ repoPath: cacheDir });
     } catch (err) {
-        // 保留缓存便于排查
-        throw new Error(`codebase 扫描失败: ${err instanceof Error ? err.message : String(err)}`);
+        log.warn(`AI codebase 扫描失败（不阻断图谱提取）: ${err instanceof Error ? err.message : String(err)}`);
     }
 
-    // 4. 确定产物输出路径（优先写入 team-repo/docs/team-codebase）
-    // 注：outputRoot 使用后续步骤 5 中 domainsBase 同源的 team-repo 路径
-    // 这里先用临时值，待 domainsBase 确定后再修正
+    // 4. 写入 docs/team-codebase 叙事文档（AI 扫描成功时）
     const outputRoot = output ?? path.join(process.cwd(), 'docs', 'team-codebase');
     let repoMdPath = path.join(outputRoot, 'repos', `${slug}.md`);
-    // path-safety：确保写入路径在 reposDir 内，防止 slug 含路径分隔符导致目录穿越
-    assertSafePath(repoMdPath, [path.join(outputRoot, 'repos')]);
 
-    // 章节级 diff + 锚点合并
-    const sourceTag = `${url}@${cloneSha.slice(0, 8)}`;
-    const syncedAt = new Date().toISOString();
+    if (codebaseMd) {
+        assertSafePath(repoMdPath, [path.join(outputRoot, 'repos')]);
+        const sourceTag = `${url}@${cloneSha.slice(0, 8)}`;
+        const syncedAt = new Date().toISOString();
 
-    let oldFile: string | null = null;
-    if (await fs.pathExists(repoMdPath)) {
+        let oldFile: string | null = null;
+        if (await fs.pathExists(repoMdPath)) {
+            try { oldFile = await fs.readFile(repoMdPath, 'utf8'); } catch { oldFile = null; }
+        }
+
+        let merged: ReturnType<typeof mergeWithAnchors>;
+        let toWrite: string;
         try {
-            oldFile = await fs.readFile(repoMdPath, 'utf8');
-        } catch {
-            oldFile = null;
-        }
-    }
-
-    let merged: ReturnType<typeof mergeWithAnchors>;
-    let toWrite: string;
-    try {
-        merged = mergeWithAnchors(oldFile, codebaseMd, { source: sourceTag, syncedAt });
-        toWrite = merged.mergedMd;
-    } catch (err) {
-        log.warn(`[section-merge] ${err instanceof Error ? err.message : err}；fallback 到全量重写`);
-        // fallback 前备份旧文件，防止已有章节数据丢失
-        if (oldFile !== null && !dryRun) {
-            const bakPath = `${repoMdPath}.bak`;
-            try {
-                await fs.writeFile(bakPath, oldFile, 'utf8');
-                log.warn(`[section-merge] 旧文件已备份至：${bakPath}`);
-            } catch (bakErr) {
-                log.debug(`[section-merge] 备份失败：${bakErr instanceof Error ? bakErr.message : bakErr}`);
+            merged = mergeWithAnchors(oldFile, codebaseMd, { source: sourceTag, syncedAt });
+            toWrite = merged.mergedMd;
+        } catch (err) {
+            log.warn(`[section-merge] ${err instanceof Error ? err.message : err}；fallback 到全量重写`);
+            if (oldFile !== null && !dryRun) {
+                const bakPath = `${repoMdPath}.bak`;
+                try { await fs.writeFile(bakPath, oldFile, 'utf8'); } catch {}
             }
+            merged = mergeWithAnchors(null, codebaseMd, { source: sourceTag, syncedAt });
+            toWrite = merged.mergedMd;
         }
-        merged = mergeWithAnchors(null, codebaseMd, { source: sourceTag, syncedAt });
-        toWrite = merged.mergedMd;
-    }
 
     // 注入 repo_url 到 frontmatter，供 aggregate 映射 domain
     if (toWrite.startsWith('---\n') && !toWrite.includes('\nrepo_url:')) {
@@ -679,6 +665,7 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
             }
         }
     }
+    } // end if (codebaseMd)
 
     // 4b. 生成 teamwiki/ 知识图谱产物（写入 team-repo 以便自动 push）
     const teamRepoDir = path.join(process.cwd(), '.teamai', 'team-repo');
