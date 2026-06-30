@@ -642,8 +642,18 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
         }
     }
 
+    // Resolve team-repo directory (needed for both docs/team-codebase and teamwiki)
+    let teamRepoDir: string;
+    try {
+        const { autoDetectInit } = await import('./config.js');
+        const { localConfig: lc } = await autoDetectInit();
+        teamRepoDir = lc.repo.localPath;
+    } catch {
+        teamRepoDir = path.join(process.cwd(), '.teamai', 'team-repo');
+    }
+
     // 4. 写入 docs/team-codebase 叙事文档（AI 扫描成功时）
-    const outputRoot = output ?? path.join(process.cwd(), 'docs', 'team-codebase');
+    const outputRoot = output ?? path.join(teamRepoDir, 'docs', 'team-codebase');
     let repoMdPath = path.join(outputRoot, 'repos', `${slug}.md`);
 
     if (codebaseMd) {
@@ -720,14 +730,6 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
     } // end if (codebaseMd)
 
     // 4b. 生成 teamwiki/ 知识图谱产物（写入 team-repo 以便自动 push）
-    let teamRepoDir: string;
-    try {
-        const { autoDetectInit } = await import('./config.js');
-        const { localConfig: lc } = await autoDetectInit();
-        teamRepoDir = lc.repo.localPath;
-    } catch {
-        teamRepoDir = path.join(process.cwd(), '.teamai', 'team-repo');
-    }
     const teamwikiRoot = output
         ? path.resolve(output, '..', 'teamwiki')
         : path.join(teamRepoDir, 'teamwiki');
