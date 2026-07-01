@@ -191,14 +191,24 @@ export async function importFromRepoList(
         }
     }
 
-    // 6. 统一推送（graph + aggregate 一次性提交）
+    // 6. 统一推送（graph + aggregate 通过 MR 提交）
     if (!dryRun && succeeded.length > 0) {
         try {
             const { autoDetectInit } = await import('./config.js');
-            const { localConfig: lc } = await autoDetectInit();
-            const { autoPushTeamRepo } = await import('./utils/git.js');
-            await autoPushTeamRepo(lc.repo.localPath, '[teamai] Batch import: graph + aggregate');
-            log.success(`已推送到团队知识仓库 (${lc.repo.remote})`);
+            const { localConfig: lc, teamConfig: tc } = await autoDetectInit();
+            const { autoPushViaMR } = await import('./utils/git.js');
+            const prUrl = await autoPushViaMR(
+                lc.repo.localPath,
+                '[teamai] Batch import: graph + aggregate',
+                ['.'],
+                { repo: tc.repo, provider: tc.provider, reviewers: tc.reviewers },
+                { repo: lc.repo, username: lc.username },
+            );
+            if (prUrl) {
+                log.success(`已创建 MR: ${prUrl}`);
+            } else {
+                log.success(`已推送分支到团队知识仓库 (${lc.repo.remote})`);
+            }
         } catch (e) {
             log.warn(`[git] batch push failed (non-blocking): ${(e as Error).message}`);
         }

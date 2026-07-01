@@ -645,11 +645,15 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
     // Resolve team-repo directory (needed for both docs/team-codebase and teamwiki)
     let teamRepoDir: string;
     let teamRepoRemote = '';
+    let mrTeamConfig: { repo: string; provider?: string; reviewers?: string[] } | null = null;
+    let mrLocalConfig: { repo: { remote: string; localPath: string }; username: string } | null = null;
     try {
         const { autoDetectInit } = await import('./config.js');
-        const { localConfig: lc } = await autoDetectInit();
+        const { localConfig: lc, teamConfig: tc } = await autoDetectInit();
         teamRepoDir = lc.repo.localPath;
         teamRepoRemote = lc.repo.remote;
+        mrTeamConfig = { repo: tc.repo, provider: tc.provider, reviewers: tc.reviewers };
+        mrLocalConfig = { repo: lc.repo, username: lc.username };
     } catch {
         teamRepoDir = path.join(process.cwd(), '.teamai', 'team-repo');
     }
@@ -829,7 +833,7 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
         }
     }
 
-    // 5. 聚合全局图谱 + 自动推送（单仓模式；batch 模式由 import-repo-list 统一处理）
+    // 5. 聚合全局图谱 + 创建 MR（单仓模式；batch 模式由 import-repo-list 统一处理）
     if (!dryRun && !skipAutoPush) {
         if (teamwikiRoot) {
             try {
@@ -839,10 +843,20 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
                 log.debug(`[graph] 单仓聚合跳过: ${(e as Error).message}`);
             }
         }
-        if (await fs.pathExists(teamRepoDir)) {
-            const { autoPushTeamRepo } = await import('./utils/git.js');
-            await autoPushTeamRepo(teamRepoDir, `[teamai] Import codebase knowledge from ${owner}/${repoName}`);
-            log.success(`已推送到团队知识仓库${teamRepoRemote ? ` (${teamRepoRemote})` : ''}`);
+        if (await fs.pathExists(teamRepoDir) && mrTeamConfig && mrLocalConfig) {
+            const { autoPushViaMR } = await import('./utils/git.js');
+            const prUrl = await autoPushViaMR(
+                teamRepoDir,
+                `[teamai] Import codebase knowledge from ${owner}/${repoName}`,
+                ['.'],
+                mrTeamConfig,
+                mrLocalConfig,
+            );
+            if (prUrl) {
+                log.success(`已创建 MR: ${prUrl}`);
+            } else {
+                log.success(`已推送分支到团队知识仓库${teamRepoRemote ? ` (${teamRepoRemote})` : ''}`);
+            }
         }
     }
 
@@ -856,10 +870,13 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
                 try {
                     const { deepEnrich } = await import('./deep-enrich.js');
                     await deepEnrich({ project: slug, evidenceDir, wikiRoot: teamwikiRoot, cacheDir });
-                    if (!skipAutoPush) {
-                        const { autoPushTeamRepo } = await import('./utils/git.js');
+                    if (!skipAutoPush && mrTeamConfig && mrLocalConfig) {
+                        const { autoPushViaMR } = await import('./utils/git.js');
                         if (await fs.pathExists(teamRepoDir)) {
-                            await autoPushTeamRepo(teamRepoDir, `[teamai] Deep enrich: ${slug}`);
+                            await autoPushViaMR(
+                                teamRepoDir, `[teamai] Deep enrich: ${slug}`,
+                                ['.'], mrTeamConfig, mrLocalConfig,
+                            );
                         }
                     }
                     log.info(chalk.green(`✓ 深度生成完成: ${slug}`));
