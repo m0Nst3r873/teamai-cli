@@ -9,7 +9,7 @@ import { readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 
 import type { GraphIndex } from './wiki-engine/core/graph-index.schema.js';
-import { tokenize } from './utils/tokenizer.js';
+import { tokenize, tokenCount, MAX_TOKENIZE_CHARS } from './utils/tokenizer.js';
 
 export interface CodeKnowledgeResult {
   page: string;
@@ -29,7 +29,7 @@ interface PageDoc {
   path: string;
   title: string;
   content: string;
-  uniqueTokens: Set<string>;
+  tokens: string[];
   tokenCount: number; // B10: raw (non-deduplicated) token count for BM25 dl
 }
 
@@ -39,19 +39,10 @@ const TITLE_BOOST = 3.0;
 const RELATION_WEIGHT: Record<string, number> = { DEPENDS_ON: 3, REFERENCES: 2, MAPS_TO: 2, CONTAINS: 1 };
 const ENTRY_NODE_BOOST = 8;
 
-/** Raw (non-deduplicated) token count for BM25 dl (B10 fix) */
-function rawTokenCount(text: string): number {
-  const safe = text.length > MAX_INDEX_CHARS ? text.slice(0, MAX_INDEX_CHARS) : text;
-  const camelSplit = safe.replace(/([a-z])([A-Z])/g, '$1_$2').toLowerCase();
-  return camelSplit.split(/[^a-z0-9一-鿿]+/).filter((w) => w.length >= 2).length;
-}
-
-const MAX_INDEX_CHARS = 100_000;
-
 function countOccurrences(text: string, token: string): number {
   let count = 0;
   let idx = 0;
-  const lower = text.toLowerCase();
+  const lower = (text.length > MAX_TOKENIZE_CHARS ? text.slice(0, MAX_TOKENIZE_CHARS) : text).toLowerCase();
   while (true) {
     idx = lower.indexOf(token, idx);
     if (idx === -1) break;
@@ -67,8 +58,12 @@ function buildCorpusStats(pages: PageDoc[]): CorpusStats {
 
   for (const page of pages) {
     totalLength += page.tokenCount;
-    for (const token of page.uniqueTokens) {
-      df.set(token, (df.get(token) ?? 0) + 1);
+    const seen = new Set<string>();
+    for (const token of page.tokens) {
+      if (!seen.has(token)) {
+        seen.add(token);
+        df.set(token, (df.get(token) ?? 0) + 1);
+      }
     }
   }
 
@@ -183,50 +178,49 @@ function extractSnippet(content: string, queryTokens: string[], maxLen: number =
   return snippet;
 }
 
-async function collectMdFiles(dir: string): Promise<string[]> {
-  const results: string[] = [];
-  let entries;
-  try {
-    entries = await readdir(dir, { withFileTypes: true });
-  } catch {
-    return results;
-  }
-  for (const entry of entries) {
-    const fullPath = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      results.push(...await collectMdFiles(fullPath));
-    } else if (entry.name.endsWith('.md')) {
-      results.push(fullPath);
-    }
-  }
-  return results;
-}
-
 async function loadWikiPages(wikiRoot: string): Promise<PageDoc[]> {
   const evidenceDir = path.join(wikiRoot, 'evidence', 'code');
   const pages: PageDoc[] = [];
 
-  const allMdFiles = await collectMdFiles(evidenceDir);
-  for (const mdPath of allMdFiles) {
-    try {
-      const content = await readFile(mdPath, 'utf-8');
-      const titleMatch = content.match(/^title:\s*(.+)$/m);
-      const fileName = path.basename(mdPath, '.md');
-      const title = titleMatch ? titleMatch[1].trim() : fileName;
-      const relativePath = path.relative(path.join(wikiRoot, 'evidence', 'code'), mdPath);
-      pages.push({
-        path: `evidence/code/${relativePath}`,
-        title,
-        content,
-        uniqueTokens: new Set(tokenize(content)),
-        tokenCount: rawTokenCount(content),
-      });
-    } catch {
-      continue;
-    }
+  let projectDirs: string[];
+  try {
+    const entries = await readdir(evidenceDir, { withFileTypes: true });
+    projectDirs = entries.filter(e => e.isDirectory()).map(e => e.name);
+  } catch {
+    return pages;
+  }
+
+  for (const project of projectDirs) {
+    const projectDir = path.join(evidenceDir, project);
+    await loadPagesRecursive(projectDir, `evidence/code/${project}`, pages);
   }
 
   return pages;
+}
+
+async function loadPagesRecursive(dir: string, relativePath: string, pages: PageDoc[]): Promise<void> {
+  const entries = await readdir(dir, { withFileTypes: true }).catch(() => [] as import('node:fs').Dirent[]);
+  for (const entry of entries) {
+    const fullPath = path.join(dir, entry.name);
+    if (entry.isDirectory()) {
+      await loadPagesRecursive(fullPath, `${relativePath}/${entry.name}`, pages);
+    } else if (entry.name.endsWith('.md')) {
+      try {
+        const content = await readFile(fullPath, 'utf-8');
+        const titleMatch = content.match(/^title:\s*(.+)$/m);
+        const title = titleMatch ? titleMatch[1].trim() : entry.name.replace('.md', '');
+        pages.push({
+          path: `${relativePath}/${entry.name}`,
+          title,
+          content,
+          tokens: tokenize(content),
+          tokenCount: tokenCount(content),
+        });
+      } catch {
+        continue;
+      }
+    }
+  }
 }
 
 // B7: Use protocol loadGraphIndex instead of local implementation

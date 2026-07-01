@@ -21,12 +21,11 @@ export function labelFromScore(score: number): WikiConfidence {
   return "AMBIGUOUS";
 }
 
-/** Build a NumericConfidence from factors (max of weights) */
+/** Build a NumericConfidence from factors (cumulative evidence, capped at 1.0) */
 export function buildConfidence(factors: ConfidenceFactor[]): NumericConfidence {
   if (factors.length === 0) return { score: 0, label: "AMBIGUOUS", factors: [] };
-  const score = Math.max(...factors.map(f => f.weight));
-  const clamped = Math.min(1, Math.max(0, score));
-  return { score: clamped, label: labelFromScore(clamped), factors };
+  const score = Math.min(1, factors.reduce((sum, f) => sum + f.weight, 0));
+  return { score, label: labelFromScore(score), factors };
 }
 
 // ─── API↔Interface Matching ─────────────────────────────────────────────────

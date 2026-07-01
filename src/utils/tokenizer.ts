@@ -9,14 +9,13 @@
  * - 全小写
  * - 去重
  */
-const MAX_TOKENIZE_CHARS = 100_000;
+export const MAX_TOKENIZE_CHARS = 50_000;
 
 export function tokenize(text: string): string[] {
   if (!text) return [];
 
   const input = text.length > MAX_TOKENIZE_CHARS ? text.slice(0, MAX_TOKENIZE_CHARS) : text;
   const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'word' });
-  const segments = [...segmenter.segment(input)];
   const tokens: string[] = [];
 
   // Collect CJK characters in runs for bigram generation
@@ -31,7 +30,7 @@ export function tokenize(text: string): string[] {
     cjkRun = [];
   };
 
-  for (const seg of segments) {
+  for (const seg of segmenter.segment(input)) {
     if (!seg.isWordLike) {
       flushCjkRun();
       continue;
@@ -68,4 +67,16 @@ export function tokenize(text: string): string[] {
   flushCjkRun();
 
   return [...new Set(tokens)];
+}
+
+/** Non-deduplicated word-like token count (for BM25 document length). */
+export function tokenCount(text: string): number {
+  if (!text) return 0;
+  const input = text.length > MAX_TOKENIZE_CHARS ? text.slice(0, MAX_TOKENIZE_CHARS) : text;
+  const segmenter = new Intl.Segmenter('zh-CN', { granularity: 'word' });
+  let count = 0;
+  for (const seg of segmenter.segment(input)) {
+    if (seg.isWordLike) count++;
+  }
+  return count;
 }

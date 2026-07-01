@@ -90,7 +90,7 @@ export async function importFromRepoList(
     const singleEntries: ReturnType<typeof sortByPriority> = [];
     for (const item of repoListFile.repos) {
         if (isOrgEntry(item)) {
-            log.warn(`org entry 暂不支持，已跳过：${item.org}（将在 P5.4 实现）`);
+            log.warn(`org entry not yet supported, skipped: ${item.org}`);
             skipped.push({ url: item.org, reason: 'org entry 暂不支持（P5.4 实现）' });
         } else {
             singleEntries.push(item);
@@ -124,7 +124,7 @@ export async function importFromRepoList(
             succeeded.push(1);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            log.warn(`导入失败：${entry.url} — ${message}`);
+            log.warn(`import failed: ${entry.url} — ${message}`);
             failed.push({ url: entry.url, error: message });
         }
     }
@@ -161,7 +161,7 @@ export async function importFromRepoList(
             const { aggregateGlobalGraph } = await import('./graph-aggregate.js');
             await aggregateGlobalGraph(teamwikiRoot);
         } catch (e) {
-            log.warn(`[graph] 全局图谱聚合失败（不中断流程）：${(e as Error).message}`);
+            log.warn(`[graph] global aggregation failed (non-blocking): ${(e as Error).message}`);
         }
     }
 
@@ -184,10 +184,10 @@ export async function importFromRepoList(
             const domains = await loadDomains(domainsBase);
             await regenerateAggregate({ paths, domains });
             aggregateGenerated = true;
-            log.info(`聚合文件已生成：${paths.index}`);
+            log.info(`aggregated files generated: ${paths.index}`);
         } catch (err) {
             const message = err instanceof Error ? err.message : String(err);
-            log.warn(`聚合文件生成失败（不中断流程）：${message}`);
+            log.warn(`aggregation file generation failed (non-blocking): ${message}`);
         }
     }
 
@@ -200,7 +200,7 @@ export async function importFromRepoList(
             await autoPushTeamRepo(lc.repo.localPath, '[teamai] Batch import: graph + aggregate');
             log.success(`已推送到团队知识仓库 (${lc.repo.remote})`);
         } catch (e) {
-            log.warn(`[git] 批量推送失败（不中断流程）：${(e as Error).message}`);
+            log.warn(`[git] batch push failed (non-blocking): ${(e as Error).message}`);
         }
     }
 

@@ -390,7 +390,7 @@ async function interactiveConfirmDomain(
 
     if (lower === 'o') {
         const existingDomains = domains.domains.map((d, idx) => `  ${idx + 1}. ${d.name}`);
-        console.log('已有域列表：');
+        console.log('existing domains:');
         console.log(existingDomains.join('\n'));
         const numStr = await askQuestion('请输入编号：', '');
         const num = parseInt(numStr, 10);
@@ -479,7 +479,7 @@ export async function detectDomainDrift(args: {
         });
 
         log.warn(
-            `[drift] 仓库 ${url} 可能需要重新分类` +
+            `[drift] repo ${url} may need reclassification` +
             `（推荐域 ${recommendResult.domain}，confidence ${recommendResult.confidence.toFixed(2)}），` +
             `已记入 history。请人工 review，自动归属未变。`,
         );
@@ -580,7 +580,7 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
 
     if (useIncremental) {
         oldSha = lastSync.sha;
-        log.info(`[incremental] 缓存命中 ${cacheDir}，从 ${oldSha.slice(0, 8)} 增量同步`);
+        log.info(`[incremental] cache hit ${cacheDir}, syncing from ${oldSha.slice(0, 8)}`);
         try {
             const fetchResult = await shallowFetch(cacheDir);
             cloneSha = fetchResult.sha;
@@ -588,7 +588,7 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
             log.info(`[incremental] Fetch 完成: SHA=${cloneSha.slice(0, 8)}`);
         } catch (fetchErr) {
             log.warn(
-                `[incremental] fetch 失败，fallback 到全量 clone：` +
+                `[incremental] fetch failed, falling back to full clone: ` +
                 `${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`,
             );
             try {
@@ -620,12 +620,12 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
 
     // 2.5 SHA 未变化时跳过 AI 扫描（增量模式快速路径）
     if (useIncremental && oldSha && cloneSha === oldSha) {
-        log.info(`[incremental] SHA 未变化 (${cloneSha.slice(0, 8)})，跳过 AI 扫描`);
+        log.info(`[incremental] SHA unchanged (${cloneSha.slice(0, 8)}), skipping AI scan`);
         await writeLastSync(cacheDir, cloneSha);
         try {
             await touchCacheEntry({ provider: providerName, owner, repo: repoName, lastSyncedSha: cloneSha });
         } catch {}
-        log.info(chalk.green(`✓ 仓库 ${owner}/${repoName} 无变化，跳过`));
+        log.info(chalk.green(`✓ repo ${owner}/${repoName} unchanged, skipped`));
         return;
     }
 
@@ -674,7 +674,7 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
             merged = mergeWithAnchors(oldFile, codebaseMd, { source: sourceTag, syncedAt });
             toWrite = merged.mergedMd;
         } catch (err) {
-            log.warn(`[section-merge] ${err instanceof Error ? err.message : err}；fallback 到全量重写`);
+            log.warn(`[section-merge] ${err instanceof Error ? err.message : err}; falling back to full rewrite`);
             if (oldFile !== null && !dryRun) {
                 const bakPath = `${repoMdPath}.bak`;
                 try { await fs.writeFile(bakPath, oldFile, 'utf8'); } catch {}
@@ -822,7 +822,7 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
             const { reconcileKnowledge } = await import('./wiki-engine/adapters/index.js');
             const result = await reconcileKnowledge({ wikiRoot: teamwikiRoot, dryRun: false });
             if (result.mappings > 0 || result.gaps.length > 0) {
-                log.info(`  对账: ${result.mappings} 映射, ${result.gaps.length} 缺口, ${result.graphEdges.length} MAPS_TO 边`);
+                log.info(`  reconcile: ${result.mappings} mappings, ${result.gaps.length} gaps, ${result.graphEdges.length} MAPS_TO edges`);
             }
         } catch (e) {
             log.debug(`reconcile skipped: ${(e as Error).message}`);
