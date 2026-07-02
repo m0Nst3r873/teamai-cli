@@ -679,14 +679,23 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
                     const marker = '## AI 架构叙事';
                     const markerIdx = existing.indexOf(marker);
                     const base = markerIdx >= 0 ? existing.slice(0, markerIdx).trimEnd() : existing.trimEnd();
-                    const combined = base + '\n\n---\n\n' + marker + '\n\n' + aiNarrative;
+                    let combined: string;
+                    if (!base || !base.startsWith('---')) {
+                        combined = `---\ntitle: ${slug} overview\ndomain: code-knowledge\n---\n\n${marker}\n\n${aiNarrative}`;
+                    } else {
+                        combined = base + '\n\n---\n\n' + marker + '\n\n' + aiNarrative;
+                    }
                     await fs.writeFile(overviewPath, combined, 'utf8');
                 }
                 // Per-repo graph: copy to evidence/<slug>/.indices/ (no global merge here — done in batch)
                 const srcGraph = path.join(cacheWiki, '.indices', 'graph-index.json');
-                const evidenceGraphDir = path.join(teamwikiRoot, 'evidence', 'code', slug, '.indices');
-                await fs.ensureDir(evidenceGraphDir);
-                await fs.copy(srcGraph, path.join(evidenceGraphDir, 'graph-index.json'));
+                if (await fs.pathExists(srcGraph)) {
+                    const evidenceGraphDir = path.join(teamwikiRoot, 'evidence', 'code', slug, '.indices');
+                    await fs.ensureDir(evidenceGraphDir);
+                    await fs.copy(srcGraph, path.join(evidenceGraphDir, 'graph-index.json'));
+                } else {
+                    log.debug(`[graph] per-repo graph-index.json not found, skipping copy`);
+                }
                 await fs.remove(cacheWiki);
             }
             // 白名单显式 domain 覆盖 AI 推断

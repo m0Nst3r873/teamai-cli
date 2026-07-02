@@ -544,20 +544,22 @@ function buildG6Content(project: string, manifest: Manifest): string {
     return '# 多跳传递依赖分析\n<!-- search-anchor: 传递依赖, 爆炸半径, 影响范围, blast radius, transitive -->\n\n（暂无依赖边数据，无法计算传递依赖）\n';
   }
 
+  // 正向邻接表（from→to）和反向邻接表（to→from，用于爆炸半径 BFS）
   const adj = new Map<string, Set<string>>();
-  const inDegree = new Map<string, number>();
+  const revAdj = new Map<string, Set<string>>();
   for (const e of edges) {
-    const existing = adj.get(e.from) ?? new Set<string>();
-    existing.add(e.to);
-    adj.set(e.from, existing);
-    inDegree.set(e.to, (inDegree.get(e.to) ?? 0) + 1);
-    if (!inDegree.has(e.from)) inDegree.set(e.from, 0);
+    const fwd = adj.get(e.from) ?? new Set<string>();
+    fwd.add(e.to);
+    adj.set(e.from, fwd);
+    const rev = revAdj.get(e.to) ?? new Set<string>();
+    rev.add(e.from);
+    revAdj.set(e.to, rev);
   }
 
-  const allNodes = [...new Set([...adj.keys(), ...inDegree.keys()])];
+  const allNodes = [...new Set([...adj.keys(), ...revAdj.keys()])];
   const degree = allNodes.map(n => ({
     node: n,
-    total: (adj.get(n)?.size ?? 0) + (inDegree.get(n) ?? 0),
+    total: (adj.get(n)?.size ?? 0) + (revAdj.get(n)?.size ?? 0),
   })).sort((a, b) => b.total - a.total);
 
   const topNodes = degree.slice(0, 5);
@@ -573,16 +575,16 @@ function buildG6Content(project: string, manifest: Manifest): string {
   for (const { node, total } of topNodes) {
     lines.push(`## ${node}（degree: ${total}）`, '');
 
-    // 3-hop BFS forward
+    // 3-hop BFS on reverse edges: find who transitively depends on this node
     const visited = new Set<string>([node]);
     let frontier = [node];
     const hopResults: string[][] = [[], [], []];
     for (let hop = 0; hop < 3; hop++) {
       const nextFrontier: string[] = [];
       for (const curr of frontier) {
-        const neighbors = adj.get(curr);
-        if (!neighbors) continue;
-        for (const next of neighbors) {
+        const dependents = revAdj.get(curr);
+        if (!dependents) continue;
+        for (const next of dependents) {
           if (!visited.has(next)) {
             visited.add(next);
             nextFrontier.push(next);
@@ -612,26 +614,28 @@ async function runPhaseAiGraph(
   opts: DeepEnrichOptions,
   ctx: EnrichContext,
   docsDir: string,
-): Promise<void> {
+): Promise<{ g5Generated: boolean; g6Generated: boolean }> {
   const { project, evidenceDir } = opts;
   log.info(`deep-enrich[${project}]: Phase 4 — 生成 AI 图谱文档（G5/G6）`);
 
   await mkdir(docsDir, { recursive: true });
 
   // G6: 确定性 BFS（不需要 AI）
+  const g6HasEdges = (ctx.manifest.edges ?? []).length > 0;
   const g6 = buildG6Content(project, ctx.manifest);
   await writeFile(path.join(docsDir, 'graph-g6-multihop.md'), g6, 'utf-8');
   log.debug(`deep-enrich[${project}]: G6 多跳路径写入完成`);
 
   // G5: AI 生成场景序列图（需要足够的模块数据）
+  let g5Generated = false;
   if (ctx.moduleDocs.size < 2) {
     log.warn(`deep-enrich[${project}]: 模块数不足（${ctx.moduleDocs.size} < 2），跳过 G5`);
-    return;
+    return { g5Generated, g6Generated: g6HasEdges };
   }
   const architectureMd = await readFileSafe(path.join(docsDir, 'architecture.md'));
   if (!architectureMd.trim()) {
     log.warn(`deep-enrich[${project}]: 无架构文档，跳过 G5 场景序列图生成`);
-    return;
+    return { g5Generated, g6Generated: g6HasEdges };
   }
 
   const moduleList = [...ctx.moduleDocs.entries()]
@@ -645,10 +649,12 @@ async function runPhaseAiGraph(
     if (g5Content.trim()) {
       await writeFile(path.join(docsDir, 'graph-g5-scenarios.md'), g5Content, 'utf-8');
       log.debug(`deep-enrich[${project}]: G5 场景序列图写入完成`);
+      g5Generated = true;
     }
   } catch (e) {
     log.warn(`deep-enrich[${project}]: G5 场景序列图生成失败，跳过: ${(e as Error).message}`);
   }
+  return { g5Generated, g6Generated: g6HasEdges };
 }
 
 // ─── Phase 5: 索引增强（router.md + per-project index.md 重写）──
@@ -657,15 +663,19 @@ async function runPhaseIndexEnhance(
   opts: DeepEnrichOptions,
   ctx: EnrichContext,
   docsDir: string,
+  graphFlags?: { g5Generated: boolean; g6Generated: boolean },
 ): Promise<void> {
   const { project, evidenceDir } = opts;
   log.info(`deep-enrich[${project}]: Phase 5 — 索引增强`);
 
   const { graphReadmeTemplate } = await import('./wiki-engine/adapters/templates.js');
 
-  // 写入 graph/README.md 路由分发表
+  // 写入 graph/README.md 路由分发表（按实际生成情况动态渲染）
   await mkdir(docsDir, { recursive: true });
-  const graphReadme = graphReadmeTemplate(project);
+  const graphReadme = graphReadmeTemplate(project, {
+    hasG5: graphFlags?.g5Generated ?? false,
+    hasG6: graphFlags?.g6Generated ?? true,
+  });
   await writeFile(path.join(docsDir, 'README.md'), graphReadme, 'utf-8');
   log.debug(`deep-enrich[${project}]: graph/README.md 路由表写入完成`);
 }
@@ -733,17 +743,18 @@ export async function deepEnrich(opts: DeepEnrichOptions): Promise<void> {
   }
 
   // 6. Phase 4: AI 图谱（G5 场景序列图 + G6 多跳路径）
+  let graphFlags = { g5Generated: false, g6Generated: true };
   if (progress.phase === 'graph' || progress.phase === 'ai-graph') {
     progress.phase = 'ai-graph';
     await saveProgress(evidenceDir, progress);
-    await runPhaseAiGraph(opts, ctx, docsDir);
+    graphFlags = await runPhaseAiGraph(opts, ctx, docsDir);
   }
 
   // 7. Phase 5: 索引增强（graph/README.md 路由表）
   if (progress.phase === 'ai-graph' || progress.phase === 'index-enhance') {
     progress.phase = 'index-enhance';
     await saveProgress(evidenceDir, progress);
-    await runPhaseIndexEnhance(opts, ctx, docsDir);
+    await runPhaseIndexEnhance(opts, ctx, docsDir, graphFlags);
   }
 
   // 8. 完成

@@ -42,7 +42,7 @@ const ENTRY_NODE_BOOST = 8;
 /** 导航文件：在 context 模式下排除，避免模板文案干扰 BM25 */
 const NAVIGATION_FILES = new Set(['router.md', 'index.md', 'hot.md']);
 
-/** context 模式允许搜索的文件模式 */
+/** context 模式允许搜索的文件模式（白名单，覆盖 overview + modules + docs 含 G1-G6） */
 const CONTEXT_ALLOWED_PATTERNS = [
   /overview\.md$/,
   /modules\/.+\.md$/,
@@ -221,12 +221,12 @@ async function loadWikiPages(wikiRoot: string, depth: 'route' | 'context' | 'loo
   const pages: PageDoc[] = [];
 
   if (depth === 'route') {
-    // route 模式：只加载 router.md 和各项目的 docs/README.md
+    // route 模式：只加载 router.md（路由入口）
     const routerPath = path.join(wikiRoot, 'router.md');
     try {
       const content = await readFile(routerPath, 'utf-8');
       const titleMatch = content.match(/^title:\s*(.+)$/m);
-      const title = titleMatch ? titleMatch[1].trim() : 'router';
+      const title = titleMatch ? titleMatch[1].trim() : 'Team Wiki Router';
       pages.push({
         path: 'router.md',
         title,
@@ -236,32 +236,6 @@ async function loadWikiPages(wikiRoot: string, depth: 'route' | 'context' | 'loo
       });
     } catch {
       // router.md 不存在则跳过
-    }
-
-    const evidenceDir = path.join(wikiRoot, 'evidence', 'code');
-    let projectDirs: string[];
-    try {
-      const entries = await readdir(evidenceDir, { withFileTypes: true });
-      projectDirs = entries.filter(e => e.isDirectory()).map(e => e.name);
-    } catch {
-      return pages;
-    }
-    for (const project of projectDirs) {
-      const readmePath = path.join(evidenceDir, project, 'docs', 'README.md');
-      try {
-        const content = await readFile(readmePath, 'utf-8');
-        const titleMatch = content.match(/^title:\s*(.+)$/m);
-        const title = titleMatch ? titleMatch[1].trim() : project;
-        pages.push({
-          path: `evidence/code/${project}/docs/README.md`,
-          title,
-          content,
-          tokens: tokenize(content),
-          tokenCount: tokenCount(content),
-        });
-      } catch {
-        continue;
-      }
     }
     return pages;
   }
@@ -305,9 +279,12 @@ async function loadPagesRecursive(
     } else if (entry.name.endsWith('.md')) {
       const relFilePath = `${relativePath}/${entry.name}`;
       if (depth === 'context') {
-        // 排除项目内部的导航/索引文件（如 index.md）和原始 facts 页面
-        if (NAVIGATION_FILES.has(entry.name)) continue;
+        // 先检查白名单模式（overview/modules/docs 下的文件）
         if (!CONTEXT_ALLOWED_PATTERNS.some(p => p.test(relFilePath))) continue;
+        // 仅排除项目根层级的导航文件（不影响 docs/index.md 等嵌套文件）
+        const relSegments = relFilePath.split('/');
+        const depthFromProject = relSegments.length - 3; // evidence/code/<project>/ = 3 segments
+        if (depthFromProject <= 1 && NAVIGATION_FILES.has(entry.name)) continue;
       }
       try {
         const content = await readFile(fullPath, 'utf-8');
@@ -354,7 +331,7 @@ export async function queryCodeKnowledge(
   if (depth === 'route') {
     return [{
       page: pages[0].path,
-      title: 'Question Router',
+      title: pages[0].title,
       score: 10,
       snippet: pages[0].content.slice(0, 800),
       kind: 'codebase',

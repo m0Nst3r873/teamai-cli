@@ -161,8 +161,14 @@ export const HOT_TEMPLATE = [
   '',
 ].join('\n');
 
-export function graphReadmeTemplate(project: string): string {
-  return [
+export interface GraphReadmeOptions {
+  hasG5?: boolean;
+  hasG6?: boolean;
+}
+
+export function graphReadmeTemplate(project: string, opts?: GraphReadmeOptions): string {
+  const { hasG5 = true, hasG6 = true } = opts ?? {};
+  const lines = [
     `# ${project} — G-Document 路由`,
     '<!-- search-anchor: 图谱, graph, G1, G2, G5, G6, 依赖, 调用链, 流程, 爆炸半径 -->',
     '',
@@ -172,8 +178,13 @@ export function graphReadmeTemplate(project: string): string {
     '|--------|------|------|',
     '| 依赖/上游/下游/imports | [graph-g1-relations.md](./graph-g1-relations.md) | N×N 组件依赖矩阵 |',
     '| 调用链/数据流/请求路径 | [graph-g2-dataflow.md](./graph-g2-dataflow.md) | 入口→数据层调用链 |',
-    '| 流程/场景/sequence | [graph-g5-scenarios.md](./graph-g5-scenarios.md) | 核心业务场景序列图 |',
-    '| 传递依赖/影响范围/blast | [graph-g6-multihop.md](./graph-g6-multihop.md) | 多跳传递依赖分析 |',
-    '',
-  ].join('\n');
+  ];
+  if (hasG5) {
+    lines.push('| 流程/场景/sequence | [graph-g5-scenarios.md](./graph-g5-scenarios.md) | 核心业务场景序列图 |');
+  }
+  if (hasG6) {
+    lines.push('| 传递依赖/影响范围/blast | [graph-g6-multihop.md](./graph-g6-multihop.md) | 多跳传递依赖分析 |');
+  }
+  lines.push('');
+  return lines.join('\n');
 }
