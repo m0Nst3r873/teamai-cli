@@ -317,7 +317,7 @@ export async function recall(
       });
     }
   } catch {
-    log.warn('recall: 代码图谱检索不可用，可运行 teamai codebase --lint 诊断');
+    log.warn('recall: code graph retrieval unavailable, run teamai codebase --lint to diagnose');
   }
 
   // Re-sort merged results by score descending, then date descending

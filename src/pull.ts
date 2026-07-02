@@ -1069,7 +1069,7 @@ export async function pull(options: GlobalOptions): Promise<void> {
   // 2. User scope — only when NOT in project mode.
   let userConfig: LocalConfig | null = null;
   if (projectMode) {
-    log.info('检测到 project scope，已跳过 user scope');
+    log.info('project scope detected, skipped user scope');
   } else {
     try {
       userConfig = await loadLocalConfigForScope('user');

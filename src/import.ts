@@ -120,7 +120,7 @@ export async function importCmd(opts: ImportOptions): Promise<void> {
         incremental: opts.incremental ?? false,
         skipEnrich: opts.skipEnrich ?? false,
       });
-      log.info(`完成：成功 ${result.succeeded}，失败 ${result.failed.length}，跳过 ${result.skipped.length}`);
+      log.info(`done: ${result.succeeded} succeeded, ${result.failed.length} failed, ${result.skipped.length} skipped`);
       if (result.failed.length > 0) process.exitCode = 1;
       return;
     } else if (opts.fromIwiki) {
@@ -196,7 +196,7 @@ export async function importCmd(opts: ImportOptions): Promise<void> {
       log.info(`扫描本地目录: ${dirPath} (project: ${slug})`);
 
       if (opts.dryRun) {
-        log.info(`[dry-run] 跳过代码提取，不执行实际操作`);
+        log.info(`[dry-run] skipping code extraction, no action taken`);
         log.success(`本地目录 ${slug} 导入完成 (dry-run)`);
         return;
       }
@@ -258,7 +258,7 @@ export async function importCmd(opts: ImportOptions): Promise<void> {
       // 分支 3b：--from-claude，扫描规则文件并交互式导入
       const candidates = await scanCandidates({ fromClaude: true });
       if (candidates.length === 0) {
-        log.info('未发现可导入的文件');
+        log.info('no importable files found');
         return;
       }
       const classified = await classifyWithAI(candidates);

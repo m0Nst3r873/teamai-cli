@@ -70,7 +70,7 @@ import { pullSources } from '../source.js';
 import { log } from '../utils/logger.js';
 import type { TeamaiConfig, LocalConfig } from '../types.js';
 
-const SKIP_MSG = '检测到 project scope，已跳过 user scope';
+const SKIP_MSG = 'project scope detected, skipped user scope';
 
 describe('pull scope isolation (issue #73)', () => {
   let tmpDir: string;
