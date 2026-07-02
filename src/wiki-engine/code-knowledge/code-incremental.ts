@@ -1,7 +1,9 @@
-import { readFile, stat } from "node:fs/promises";
+import { readFile, writeFile, stat, mkdir } from "node:fs/promises";
 import path from "node:path";
 
 import { collectCode } from "./code-collector.js";
+import type { CodeFact } from "./code-extractors.js";
+import type { InterfaceInventory } from "../interface-scanner.js";
 
 export interface CodeIncrementalChange {
   added: string[];
@@ -42,4 +44,60 @@ async function exists(filePath: string): Promise<boolean> {
   } catch {
     return false;
   }
+}
+
+// ─── Facts Cache ──────────────────────────────────────────
+
+const FACTS_CACHE_FILENAME = 'facts-cache.json';
+const INTERFACES_CACHE_FILENAME = 'interfaces-cache.json';
+
+export async function loadFactsCache(indicesDir: string): Promise<CodeFact[]> {
+  const cachePath = path.join(indicesDir, FACTS_CACHE_FILENAME);
+  try {
+    const raw = await readFile(cachePath, 'utf-8');
+    const parsed = JSON.parse(raw) as CodeFact[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+export async function saveFactsCache(indicesDir: string, facts: CodeFact[]): Promise<void> {
+  await mkdir(indicesDir, { recursive: true });
+  await writeFile(path.join(indicesDir, FACTS_CACHE_FILENAME), JSON.stringify(facts), 'utf-8');
+}
+
+export async function loadInterfacesCache(indicesDir: string): Promise<InterfaceInventory> {
+  const cachePath = path.join(indicesDir, INTERFACES_CACHE_FILENAME);
+  try {
+    const raw = await readFile(cachePath, 'utf-8');
+    const parsed = JSON.parse(raw) as InterfaceInventory;
+    return parsed?.entries ? parsed : { entries: [], scannedAt: '' };
+  } catch {
+    return { entries: [], scannedAt: '' };
+  }
+}
+
+export async function saveInterfacesCache(
+  indicesDir: string,
+  inventory: InterfaceInventory,
+): Promise<void> {
+  await mkdir(indicesDir, { recursive: true });
+  await writeFile(
+    path.join(indicesDir, INTERFACES_CACHE_FILENAME),
+    JSON.stringify(inventory, null, 2),
+    'utf-8',
+  );
+}
+
+export function pruneFactsByFiles(facts: CodeFact[], filesToRemove: Set<string>): CodeFact[] {
+  return facts.filter(f => !filesToRemove.has(f.file));
+}
+
+export function pruneInterfacesByFiles(
+  inventory: InterfaceInventory,
+  filesToRemove: Set<string>,
+): InterfaceInventory {
+  const remaining = inventory.entries.filter(e => !filesToRemove.has(e.component));
+  return { entries: remaining, scannedAt: inventory.scannedAt };
 }
