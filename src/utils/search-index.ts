@@ -1,7 +1,7 @@
 import path from 'node:path';
 import matter from 'gray-matter';
 import { readFileSafe, readJson, writeJson, listFiles, listFilesRecursive, listDirs, pathExists } from './fs.js';
-import { tokenize } from './tokenizer.js';
+import { tokenize, MAX_TOKENIZE_CHARS } from './tokenizer.js';
 import { log } from './logger.js';
 import {
   SEARCH_INDEX_VERSION,
@@ -203,8 +203,8 @@ export function inferDomain(
   return 'neutral';
 }
 
-// Re-export for external callers that previously imported tokenize from this module
-export { tokenize };
+// Re-export tokenizer for external callers
+export { tokenize, MAX_TOKENIZE_CHARS };
 
 /**
  * Parse a learning document's frontmatter and body.
@@ -507,8 +507,8 @@ export async function buildIndex(
   // Guard: don't overwrite a healthy index with a significantly smaller one
   const targetPath = opts.indexPath ?? getSearchIndexPath();
   const existingIndex = await loadIndex(targetPath);
-  if (existingIndex && existingIndex.entries.length > 0 && entries.length === 0) {
-    log.warn(`Index rebuild skipped: refusing to overwrite ${existingIndex.entries.length} entries with empty index`);
+  if (existingIndex && existingIndex.entries.length > 5 && entries.length < existingIndex.entries.length * 0.2) {
+    log.warn(`Index rebuild skipped: new index (${entries.length}) is <20% of existing (${existingIndex.entries.length}), likely partial failure`);
     return elapsed;
   }
 

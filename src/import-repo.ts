@@ -4,7 +4,6 @@ import chalk from 'chalk';
 
 import { generateCodebaseMd } from './codebase.js';
 import { extractCodebase } from './codebase-extract.js';
-import { mergeWithAnchors } from './section-patcher.js';
 import { detectProvider } from './providers/registry.js';
 import { shallowClone, shallowFetch } from './clone.js';
 import { appendPendingReview, loadPendingReview, removePendingReview } from './review-store.js';
@@ -27,7 +26,6 @@ import {
 } from './domains/index.js';
 import { askQuestion } from './utils/prompt.js';
 import { log } from './utils/logger.js';
-import { assertSafePath } from './utils/path-safety.js';
 
 // ─── Types ──────────────────────────────────────────────
 
@@ -44,7 +42,7 @@ export interface ImportFromRepoOptions {
     explicitDomain?: string;
     /** Dry-run 模式：跳过写盘但执行 clone+扫描 */
     dryRun?: boolean;
-    /** 自定义产物根目录；默认 .teamai/team-repo/docs/team-codebase */
+    /** 自定义产物根目录；默认 .teamai/team-repo/teamwiki */
     output?: string;
     /**
      * 是否启用交互式确认。
@@ -390,7 +388,7 @@ async function interactiveConfirmDomain(
 
     if (lower === 'o') {
         const existingDomains = domains.domains.map((d, idx) => `  ${idx + 1}. ${d.name}`);
-        console.log('已有域列表：');
+        console.log('existing domains:');
         console.log(existingDomains.join('\n'));
         const numStr = await askQuestion('请输入编号：', '');
         const num = parseInt(numStr, 10);
@@ -479,7 +477,7 @@ export async function detectDomainDrift(args: {
         });
 
         log.warn(
-            `[drift] 仓库 ${url} 可能需要重新分类` +
+            `[drift] repo ${url} may need reclassification` +
             `（推荐域 ${recommendResult.domain}，confidence ${recommendResult.confidence.toFixed(2)}），` +
             `已记入 history。请人工 review，自动归属未变。`,
         );
@@ -526,11 +524,12 @@ export async function detectDomainDrift(args: {
  * 流程：
  *  1. 解析 url → provider + RepoInfo（owner/repo）
  *  2. shallow clone（或增量 fetch+reset）到 ~/.teamai/cache/repos/<provider>/<owner>/<repo>
- *  3. generateCodebaseMd({ repoPath: cacheDir })
- *  4. 写出到 <outputRoot>/repos/<slug>.md（默认 outputRoot=.teamai/team-repo/docs/team-codebase）
- *  5. 推荐业务域（或使用 --domain 显式指定）
- *  6. 写入 .teamai/domains.yaml + appendHistory
- *  7. 写 LAST_SYNC
+ *  3. generateCodebaseMd({ repoPath: cacheDir }) → AI 叙事
+ *  4. extractCodebase → teamwiki evidence 产物（确定性 overview + graph）
+ *  5. AI 叙事追加到 teamwiki/evidence/code/<slug>/overview.md
+ *  6. 推荐业务域（或使用 --domain 显式指定）
+ *  7. 写入 .teamai/domains.yaml + appendHistory
+ *  8. 写 LAST_SYNC
  *
  * @throws 克隆失败、扫描失败、IO 失败时抛 Error
  */
@@ -580,7 +579,7 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
 
     if (useIncremental) {
         oldSha = lastSync.sha;
-        log.info(`[incremental] 缓存命中 ${cacheDir}，从 ${oldSha.slice(0, 8)} 增量同步`);
+        log.info(`[incremental] cache hit ${cacheDir}, syncing from ${oldSha.slice(0, 8)}`);
         try {
             const fetchResult = await shallowFetch(cacheDir);
             cloneSha = fetchResult.sha;
@@ -588,7 +587,7 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
             log.info(`[incremental] Fetch 完成: SHA=${cloneSha.slice(0, 8)}`);
         } catch (fetchErr) {
             log.warn(
-                `[incremental] fetch 失败，fallback 到全量 clone：` +
+                `[incremental] fetch failed, falling back to full clone: ` +
                 `${fetchErr instanceof Error ? fetchErr.message : String(fetchErr)}`,
             );
             try {
@@ -620,12 +619,12 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
 
     // 2.5 SHA 未变化时跳过 AI 扫描（增量模式快速路径）
     if (useIncremental && oldSha && cloneSha === oldSha) {
-        log.info(`[incremental] SHA 未变化 (${cloneSha.slice(0, 8)})，跳过 AI 扫描`);
+        log.info(`[incremental] SHA unchanged (${cloneSha.slice(0, 8)}), skipping AI scan`);
         await writeLastSync(cacheDir, cloneSha);
         try {
             await touchCacheEntry({ provider: providerName, owner, repo: repoName, lastSyncedSha: cloneSha });
         } catch {}
-        log.info(chalk.green(`✓ 仓库 ${owner}/${repoName} 无变化，跳过`));
+        log.info(chalk.green(`✓ repo ${owner}/${repoName} unchanged, skipped`));
         return;
     }
 
@@ -642,127 +641,99 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
         }
     }
 
-    // Resolve team-repo directory (needed for both docs/team-codebase and teamwiki)
+    // Resolve team-repo directory (needed for teamwiki evidence output)
     let teamRepoDir: string;
     let teamRepoRemote = '';
+    let mrTeamConfig: { repo: string; provider?: string; reviewers?: string[] } | null = null;
+    let mrLocalConfig: { repo: { remote: string; localPath: string }; username: string } | null = null;
     try {
         const { autoDetectInit } = await import('./config.js');
-        const { localConfig: lc } = await autoDetectInit();
+        const { localConfig: lc, teamConfig: tc } = await autoDetectInit();
         teamRepoDir = lc.repo.localPath;
         teamRepoRemote = lc.repo.remote;
+        mrTeamConfig = { repo: tc.repo, provider: tc.provider, reviewers: tc.reviewers };
+        mrLocalConfig = { repo: lc.repo, username: lc.username };
     } catch {
         teamRepoDir = path.join(process.cwd(), '.teamai', 'team-repo');
     }
 
-    // 4. 写入 docs/team-codebase 叙事文档（AI 扫描成功时）
-    const outputRoot = output ?? path.join(teamRepoDir, 'docs', 'team-codebase');
-    let repoMdPath = path.join(outputRoot, 'repos', `${slug}.md`);
-
-    if (codebaseMd) {
-        assertSafePath(repoMdPath, [path.join(outputRoot, 'repos')]);
-        const sourceTag = `${url}@${cloneSha.slice(0, 8)}`;
-        const syncedAt = new Date().toISOString();
-
-        let oldFile: string | null = null;
-        if (await fs.pathExists(repoMdPath)) {
-            try { oldFile = await fs.readFile(repoMdPath, 'utf8'); } catch { oldFile = null; }
-        }
-
-        let merged: ReturnType<typeof mergeWithAnchors>;
-        let toWrite: string;
-        try {
-            merged = mergeWithAnchors(oldFile, codebaseMd, { source: sourceTag, syncedAt });
-            toWrite = merged.mergedMd;
-        } catch (err) {
-            log.warn(`[section-merge] ${err instanceof Error ? err.message : err}；fallback 到全量重写`);
-            if (oldFile !== null && !dryRun) {
-                const bakPath = `${repoMdPath}.bak`;
-                try { await fs.writeFile(bakPath, oldFile, 'utf8'); } catch {}
-            }
-            merged = mergeWithAnchors(null, codebaseMd, { source: sourceTag, syncedAt });
-            toWrite = merged.mergedMd;
-        }
-
-    // 注入 repo_url 到 frontmatter，供 aggregate 映射 domain
-    if (toWrite.startsWith('---\n') && !toWrite.includes('\nrepo_url:')) {
-        const fmEnd = toWrite.indexOf('\n---\n', 4);
-        if (fmEnd !== -1) {
-            toWrite = toWrite.slice(0, fmEnd) + `\nrepo_url: ${url}` + toWrite.slice(fmEnd);
-        }
-    }
-
-    if (dryRun) {
-        console.log(chalk.yellow(`[dry-run] 产物路径: ${repoMdPath}`));
-        console.log(chalk.yellow('[dry-run] 产物预览（前 50 行）：'));
-        const preview = toWrite.split('\n').slice(0, 50).join('\n');
-        console.log(preview);
-        if (merged.changedSlugs.length > 0) {
-            console.log(chalk.yellow(`[dry-run] 变化章节: ${merged.changedSlugs.join(', ')}`));
-        }
-        if (merged.addedSlugs.length > 0) {
-            console.log(chalk.yellow(`[dry-run] 新增章节: ${merged.addedSlugs.join(', ')}`));
-        }
-        if (merged.removedSlugs.length > 0) {
-            console.log(chalk.yellow(`[dry-run] 移除章节: ${merged.removedSlugs.join(', ')}`));
-        }
-    } else {
-        await fs.ensureDir(path.dirname(repoMdPath));
-        const noChange =
-            merged.changedSlugs.length === 0 &&
-            merged.addedSlugs.length === 0 &&
-            merged.removedSlugs.length === 0 &&
-            oldFile !== null &&
-            oldFile === toWrite;
-        if (noChange) {
-            log.info(`[section-merge] 仓库 ${repoName} 无章节变化，跳过写入`);
-        } else {
-            await fs.writeFile(repoMdPath, toWrite, 'utf8');
-            log.info(`产物已写入: ${repoMdPath}`);
-            if (merged.changedSlugs.length > 0) {
-                log.debug(`[section-merge] 变化章节: ${merged.changedSlugs.join(', ')}`);
-            }
-            if (merged.addedSlugs.length > 0) {
-                log.debug(`[section-merge] 新增章节: ${merged.addedSlugs.join(', ')}`);
-            }
-            if (merged.removedSlugs.length > 0) {
-                log.debug(`[section-merge] 移除章节: ${merged.removedSlugs.join(', ')}`);
-            }
-        }
-    }
-    } // end if (codebaseMd)
-
-    // 4b. 生成 teamwiki/ 知识图谱产物（写入 team-repo 以便自动 push）
+    // 4. 生成 teamwiki/ 知识图谱产物 + AI 叙事追加到 overview.md
     const teamwikiRoot = output
         ? path.resolve(output, '..', 'teamwiki')
         : path.join(teamRepoDir, 'teamwiki');
     if (!dryRun) {
         const cacheWiki = path.join(cacheDir, 'teamwiki');
         try {
-            await extractCodebase({ path: cacheDir, project: slug, json: false, skipEnrich });
+            // 增量模式：将已有的缓存文件复制到 cacheDir 供 extractCodebase 读取
+            if (incremental) {
+                const destIndices = path.join(teamwikiRoot, '.indices');
+                const cacheIndices = path.join(cacheDir, 'teamwiki', '.indices');
+                await fs.ensureDir(cacheIndices);
+                for (const f of ['facts-cache.json', 'interfaces-cache.json']) {
+                    const src = path.join(destIndices, f);
+                    if (await fs.pathExists(src)) {
+                        await fs.copy(src, path.join(cacheIndices, f));
+                    }
+                }
+                const existingManifest = path.join(teamwikiRoot, 'source-manifest.json');
+                if (await fs.pathExists(existingManifest)) {
+                    await fs.copy(existingManifest, path.join(cacheDir, 'teamwiki', 'source-manifest.json'));
+                }
+            }
+            await extractCodebase({ path: cacheDir, project: slug, json: false, skipEnrich, incremental });
             // 将产物从 cacheDir/teamwiki/ 移动到目标 teamwikiRoot
             if (await fs.pathExists(cacheWiki)) {
                 const evidenceSrc = path.join(cacheWiki, 'evidence', 'code', slug);
                 const evidenceDest = path.join(teamwikiRoot, 'evidence', 'code', slug);
+                // 先清除旧 evidence（保留 .indices/ 子目录），防止已删除的页面残留
+                if (await fs.pathExists(evidenceDest)) {
+                    const entries = await fs.readdir(evidenceDest);
+                    for (const entry of entries) {
+                        if (entry === '.indices') continue;
+                        await fs.remove(path.join(evidenceDest, entry));
+                    }
+                }
                 await fs.ensureDir(evidenceDest);
                 await fs.copy(evidenceSrc, evidenceDest, { overwrite: true });
-                // 如果 AI 扫描成功，将架构概述写入 overview.md
+                // 将 AI 叙事写入 overview.md（幂等：已有则替换，无则追加）
                 if (codebaseMd) {
-                    const overviewContent = [
-                        '---',
-                        `title: ${slug} overview`,
-                        'domain: code-knowledge',
-                        `source: [${url}]`,
-                        '---',
-                        '',
-                        codebaseMd.replace(/^---[\s\S]*?---\n*/m, ''),
-                    ].join('\n');
-                    await fs.writeFile(path.join(evidenceDest, 'overview.md'), overviewContent, 'utf8');
+                    const overviewPath = path.join(evidenceDest, 'overview.md');
+                    const existing = await fs.readFile(overviewPath, 'utf8').catch(() => '');
+                    const aiNarrative = codebaseMd.replace(/^---[\s\S]*?---\n*/m, '');
+                    const marker = '## AI 架构叙事';
+                    const markerIdx = existing.indexOf(marker);
+                    const base = markerIdx >= 0 ? existing.slice(0, markerIdx).trimEnd() : existing.trimEnd();
+                    let combined: string;
+                    if (!base || !base.startsWith('---')) {
+                        combined = `---\ntitle: ${slug} overview\ndomain: code-knowledge\n---\n\n${marker}\n\n${aiNarrative}`;
+                    } else {
+                        combined = base + '\n\n---\n\n' + marker + '\n\n' + aiNarrative;
+                    }
+                    await fs.writeFile(overviewPath, combined, 'utf8');
                 }
                 // Per-repo graph: copy to evidence/<slug>/.indices/ (no global merge here — done in batch)
                 const srcGraph = path.join(cacheWiki, '.indices', 'graph-index.json');
-                const evidenceGraphDir = path.join(teamwikiRoot, 'evidence', 'code', slug, '.indices');
-                await fs.ensureDir(evidenceGraphDir);
-                await fs.copy(srcGraph, path.join(evidenceGraphDir, 'graph-index.json'));
+                if (await fs.pathExists(srcGraph)) {
+                    const evidenceGraphDir = path.join(teamwikiRoot, 'evidence', 'code', slug, '.indices');
+                    await fs.ensureDir(evidenceGraphDir);
+                    await fs.copy(srcGraph, path.join(evidenceGraphDir, 'graph-index.json'));
+                } else {
+                    log.debug(`[graph] per-repo graph-index.json not found, skipping copy`);
+                }
+                // 持久化增量缓存文件到 teamwikiRoot（供后续 incremental 使用）
+                const cacheIndices = path.join(cacheWiki, '.indices');
+                const destIndices = path.join(teamwikiRoot, '.indices');
+                for (const cacheFile of ['facts-cache.json', 'interfaces-cache.json']) {
+                    const src = path.join(cacheIndices, cacheFile);
+                    if (await fs.pathExists(src)) {
+                        await fs.ensureDir(destIndices);
+                        await fs.copy(src, path.join(destIndices, cacheFile), { overwrite: true });
+                    }
+                }
+                const srcManifest = path.join(cacheWiki, 'source-manifest.json');
+                if (await fs.pathExists(srcManifest)) {
+                    await fs.copy(srcManifest, path.join(teamwikiRoot, 'source-manifest.json'), { overwrite: true });
+                }
                 await fs.remove(cacheWiki);
             }
             // 白名单显式 domain 覆盖 AI 推断
@@ -782,7 +753,7 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
             const { routerTemplate, indexTemplate, HOT_TEMPLATE } = await import('./wiki-engine/adapters/templates.js');
             const routerPath = path.join(teamwikiRoot, 'router.md');
             const indexPath = path.join(teamwikiRoot, 'index.md');
-            const projectLink = `[[code/${slug}/index]]`;
+            const projectLink = `[[evidence/code/${slug}/index]]`;
             if (await fs.pathExists(routerPath)) {
                 const router = await fs.readFile(routerPath, 'utf8');
                 if (!router.includes(projectLink)) {
@@ -822,14 +793,14 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
             const { reconcileKnowledge } = await import('./wiki-engine/adapters/index.js');
             const result = await reconcileKnowledge({ wikiRoot: teamwikiRoot, dryRun: false });
             if (result.mappings > 0 || result.gaps.length > 0) {
-                log.info(`  对账: ${result.mappings} 映射, ${result.gaps.length} 缺口, ${result.graphEdges.length} MAPS_TO 边`);
+                log.info(`  reconcile: ${result.mappings} mappings, ${result.gaps.length} gaps, ${result.graphEdges.length} MAPS_TO edges`);
             }
         } catch (e) {
             log.debug(`reconcile skipped: ${(e as Error).message}`);
         }
     }
 
-    // 5. 聚合全局图谱 + 自动推送（单仓模式；batch 模式由 import-repo-list 统一处理）
+    // 5. 聚合全局图谱 + 创建 MR（单仓模式；batch 模式由 import-repo-list 统一处理）
     if (!dryRun && !skipAutoPush) {
         if (teamwikiRoot) {
             try {
@@ -839,27 +810,40 @@ export async function importFromRepo(opts: ImportFromRepoOptions): Promise<void>
                 log.debug(`[graph] 单仓聚合跳过: ${(e as Error).message}`);
             }
         }
-        if (await fs.pathExists(teamRepoDir)) {
-            const { autoPushTeamRepo } = await import('./utils/git.js');
-            await autoPushTeamRepo(teamRepoDir, `[teamai] Import codebase knowledge from ${owner}/${repoName}`);
-            log.success(`已推送到团队知识仓库${teamRepoRemote ? ` (${teamRepoRemote})` : ''}`);
+        if (await fs.pathExists(teamRepoDir) && mrTeamConfig && mrLocalConfig) {
+            const { autoPushViaMR } = await import('./utils/git.js');
+            const prUrl = await autoPushViaMR(
+                teamRepoDir,
+                `[teamai] Import codebase knowledge from ${owner}/${repoName}`,
+                ['.'],
+                mrTeamConfig,
+                mrLocalConfig,
+            );
+            if (prUrl) {
+                log.success(`已创建 MR: ${prUrl}`);
+            } else {
+                log.success(`已推送分支到团队知识仓库${teamRepoRemote ? ` (${teamRepoRemote})` : ''}`);
+            }
         }
     }
 
     log.info(chalk.green(`✓ 仓库 ${owner}/${repoName} 导入完成`));
 
     // 5b. 后台深度生成（不阻塞；batch 模式下跳过 push 由调用方统一处理）
-    if (!dryRun && teamwikiRoot) {
+    if (!dryRun && !skipEnrich && teamwikiRoot) {
         const evidenceDir = path.join(teamwikiRoot, 'evidence', 'code', slug);
         if (await fs.pathExists(path.join(evidenceDir, '_manifest.json'))) {
             setImmediate(async () => {
                 try {
                     const { deepEnrich } = await import('./deep-enrich.js');
                     await deepEnrich({ project: slug, evidenceDir, wikiRoot: teamwikiRoot, cacheDir });
-                    if (!skipAutoPush) {
-                        const { autoPushTeamRepo } = await import('./utils/git.js');
+                    if (!skipAutoPush && mrTeamConfig && mrLocalConfig) {
+                        const { autoPushViaMR } = await import('./utils/git.js');
                         if (await fs.pathExists(teamRepoDir)) {
-                            await autoPushTeamRepo(teamRepoDir, `[teamai] Deep enrich: ${slug}`);
+                            await autoPushViaMR(
+                                teamRepoDir, `[teamai] Deep enrich: ${slug}`,
+                                ['.'], mrTeamConfig, mrLocalConfig,
+                            );
                         }
                     }
                     log.info(chalk.green(`✓ 深度生成完成: ${slug}`));

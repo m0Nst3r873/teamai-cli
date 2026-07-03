@@ -17,6 +17,7 @@ import {
   CORRECTION_KEYWORDS,
   INTERVENTION_SCAN_MAX_BYTES,
   TRANSCRIPT_INTERRUPT_PREFIX,
+  TRANSCRIPT_SYSTEM_PREFIXES,
   TRANSCRIPT_REJECT_MARKERS,
   emptyTokenUsage,
   addTokenUsage,
@@ -151,6 +152,15 @@ export async function scanTranscriptStop(
   // the same usage). Prefer message.id; fall back to the top-level requestId.
   const countedUsageKeys = new Set<string>();
 
+  // CodeBuddy persists its transcript as a single `index.json` document (a JSON
+  // object with `requests[].usage` + `messages[]`), NOT the Claude Code JSONL
+  // schema the streaming scanner below expects. Detect and parse that shape
+  // separately — otherwise every line fails JSON.parse and tokens stay 0.
+  if (path.basename(transcriptPath) === 'index.json') {
+    const cb = await scanCodebuddyIndex(transcriptPath);
+    if (cb) return cb;
+  }
+
   try {
     const stat = await fs.promises.stat(transcriptPath);
     if (stat.size === 0) return { interrupt, toolReject, tokens, prompts };
@@ -207,7 +217,13 @@ export async function scanTranscriptStop(
 
       // Plain-string user content = a genuine human prompt (older transcript shape).
       if (typeof content === 'string') {
-        if (!isMeta && content.trim() && !content.startsWith(TRANSCRIPT_INTERRUPT_PREFIX)) {
+        const trimContent = content.trim();
+        if (
+          !isMeta &&
+          trimContent &&
+          !trimContent.startsWith(TRANSCRIPT_INTERRUPT_PREFIX) &&
+          !TRANSCRIPT_SYSTEM_PREFIXES.some((p) => trimContent.startsWith(p))
+        ) {
           prompts++;
         }
         continue;
@@ -217,9 +233,10 @@ export async function scanTranscriptStop(
       let hasHumanText = false;
       for (const item of content as Array<Record<string, unknown>>) {
         if (item?.type === 'text' && typeof item.text === 'string') {
+          const txt = item.text.trim();
           if (item.text.startsWith(TRANSCRIPT_INTERRUPT_PREFIX)) {
             interrupt++;
-          } else if (item.text.trim()) {
+          } else if (txt && !TRANSCRIPT_SYSTEM_PREFIXES.some((p) => txt.startsWith(p))) {
             hasHumanText = true;
           }
         } else if (item?.type === 'tool_result' && item.is_error === true) {
@@ -242,6 +259,100 @@ export async function scanTranscriptStop(
   }
 
   return { interrupt, toolReject, tokens, prompts };
+}
+
+/**
+ * Read a CodeBuddy `index.json` transcript once. CodeBuddy's schema differs from
+ * Claude Code:
+ *
+ *   {
+ *     "messages": [{ "role": "user" | "assistant" | "tool", ... }],
+ *     "requests": [{ "usage": { "inputTokens", "outputTokens", "totalTokens" } }]
+ *   }
+ *
+ * - tokens:  summed across `requests[].usage` (same per-turn accumulation model as
+ *            the Claude scan, so re-sent context is counted each request). CodeBuddy
+ *            reports no cache-read/creation split at the request level, so those map
+ *            to 0 and `input + output` matches CodeBuddy's own `totalTokens`.
+ * - prompts: count of `messages[]` entries with role === 'user' (human turns).
+ *
+ * Returns null when the file is missing, too large, unparseable (e.g. read mid-write),
+ * or not a CodeBuddy index document.
+ */
+async function readCodebuddyIndexOnce(
+  transcriptPath: string,
+): Promise<TranscriptScanResult | null> {
+  try {
+    const stat = await fs.promises.stat(transcriptPath);
+    if (stat.size === 0 || stat.size > INTERVENTION_SCAN_MAX_BYTES) return null;
+
+    const content = await fs.promises.readFile(transcriptPath, 'utf-8');
+    const data = JSON.parse(content) as {
+      messages?: Array<{ role?: unknown }>;
+      requests?: Array<{ usage?: Record<string, unknown> }>;
+    };
+    if (!data || !Array.isArray(data.requests)) return null;
+
+    const tokens = emptyTokenUsage();
+    for (const req of data.requests) {
+      const usage = req?.usage;
+      if (!usage) continue;
+      tokens.input += toNum(usage.inputTokens);
+      tokens.output += toNum(usage.outputTokens);
+    }
+
+    const prompts = Array.isArray(data.messages)
+      ? data.messages.filter((m) => m?.role === 'user').length
+      : 0;
+
+    // CodeBuddy transcripts don't expose interrupt / tool-reject markers.
+    return { interrupt: 0, toolReject: 0, tokens, prompts };
+  } catch (e) {
+    log.warn(`dashboard: failed to scan CodeBuddy index: ${(e as Error).message}`);
+    return null;
+  }
+}
+
+/** Total token count across all four buckets. */
+function totalTokenCount(t: TokenUsage): number {
+  return t.input + t.output + t.cacheRead + t.cacheCreation;
+}
+
+/** Retry budget for waiting on CodeBuddy's post-Stop token-usage flush. */
+const CODEBUDDY_USAGE_MAX_ATTEMPTS = 8;
+const CODEBUDDY_USAGE_RETRY_MS = 250;
+
+/**
+ * Scan a CodeBuddy `index.json` for a cumulative, idempotent token + prompt
+ * snapshot, with a bounded retry.
+ *
+ * CodeBuddy flushes per-request token usage into `index.json` *shortly after* it
+ * fires the Stop hook, so the first read frequently sees the human `messages`
+ * already written (prompts are captured) but `requests[].usage` still zero. Without
+ * a retry, single-turn / last-turn sessions would permanently record 0 tokens. We
+ * re-read (up to ~1.75s, well within the 60s hook timeout) until usage appears.
+ *
+ * Returns null only when the file never parses as a CodeBuddy index — the caller
+ * then falls back to the Claude JSONL scanner.
+ */
+async function scanCodebuddyIndex(
+  transcriptPath: string,
+): Promise<TranscriptScanResult | null> {
+  let last: TranscriptScanResult | null = null;
+  for (let attempt = 0; attempt < CODEBUDDY_USAGE_MAX_ATTEMPTS; attempt++) {
+    const result = await readCodebuddyIndexOnce(transcriptPath);
+    if (result) {
+      last = result;
+      // Usage has been flushed — the snapshot is complete, stop waiting.
+      if (totalTokenCount(result.tokens) > 0) return result;
+    }
+    if (attempt < CODEBUDDY_USAGE_MAX_ATTEMPTS - 1) {
+      await new Promise((resolve) => setTimeout(resolve, CODEBUDDY_USAGE_RETRY_MS));
+    }
+  }
+  // Never observed non-zero usage: return the best (zero-token) snapshot we have,
+  // or null so the caller falls back to the Claude JSONL scanner.
+  return last;
 }
 
 /** Coerce an unknown usage field to a non-negative finite number (0 otherwise). */

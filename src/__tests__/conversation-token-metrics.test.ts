@@ -83,6 +83,50 @@ describe('scanTranscriptStop — token usage', () => {
     expect(tokens).toEqual({ input: 0, output: 7, cacheRead: 0, cacheCreation: 0 });
   });
 
+  it('parses CodeBuddy index.json (requests[].usage + user messages)', async () => {
+    // CodeBuddy persists a single index.json, not Claude JSONL. Tokens live in
+    // requests[].usage.{inputTokens,outputTokens}; prompts = user messages.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-cb-'));
+    const p = path.join(dir, 'index.json');
+    fs.writeFileSync(p, JSON.stringify({
+      messages: [
+        { id: 'a', role: 'user' },
+        { id: 'b', role: 'assistant' },
+        { id: 'c', role: 'tool' },
+        { id: 'd', role: 'user' },
+      ],
+      requests: [
+        { usage: { inputTokens: 0, outputTokens: 0, totalTokens: 0 } },
+        { usage: { inputTokens: 215609, outputTokens: 2967, totalTokens: 218576 } },
+      ],
+    }));
+    const { tokens, prompts } = await scanTranscriptStop(p);
+    expect(tokens).toEqual({ input: 215609, output: 2967, cacheRead: 0, cacheCreation: 0 });
+    expect(prompts).toBe(2);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it('retries CodeBuddy index.json until usage is flushed after Stop', async () => {
+    // CodeBuddy writes requests[].usage a moment AFTER firing the Stop hook, so the
+    // first read sees zero usage. The scanner must retry until usage appears —
+    // otherwise single-turn sessions would record 0 tokens permanently.
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'teamai-cb-race-'));
+    const p = path.join(dir, 'index.json');
+    const messages = [{ id: 'a', role: 'user' }];
+    // Initial snapshot: message present, usage not yet flushed (all zero).
+    fs.writeFileSync(p, JSON.stringify({ messages, requests: [{ usage: { inputTokens: 0, outputTokens: 0 } }] }));
+    // Flush real usage shortly after the scan starts (mimics CodeBuddy's late write).
+    const timer = setTimeout(() => {
+      fs.writeFileSync(p, JSON.stringify({ messages, requests: [{ usage: { inputTokens: 1200, outputTokens: 88 } }] }));
+    }, 300);
+
+    const { tokens, prompts } = await scanTranscriptStop(p);
+    clearTimeout(timer);
+    expect(tokens).toEqual({ input: 1200, output: 88, cacheRead: 0, cacheCreation: 0 });
+    expect(prompts).toBe(1);
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
   it('falls back to requestId for dedup when message.id is missing', async () => {
     const line = (extra: object) => JSON.stringify({
       type: 'assistant',
@@ -119,6 +163,18 @@ describe('scanTranscriptStop — prompt counting', () => {
     const { prompts, interrupt } = await scanTranscriptStop(p);
     expect(prompts).toBe(3);
     expect(interrupt).toBe(1);
+  });
+
+  it('excludes <task-notification> system messages from prompt count', async () => {
+    const taskNotif = '<task-notification>\n<task-id>abc123</task-id>\n<tool-use-id>toolu_01X</tool-use-id>\n<output-file>/tmp/out</output-file>\n</task-notification>';
+    const p = writeTranscript([
+      userText('real prompt from user'),
+      userString(taskNotif),       // system-injected, not human
+      userText(taskNotif),         // also system-injected in array form
+      userText('another real prompt'),
+    ]);
+    const { prompts } = await scanTranscriptStop(p);
+    expect(prompts).toBe(2);
   });
 });
 

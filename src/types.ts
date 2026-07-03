@@ -116,11 +116,11 @@ export const TeamaiConfigSchema = z.object({
   autoUpdate: z.boolean().optional(),
   toolPaths: z.record(z.string(), ToolPathsSchema).default({
     claude: { skills: '.claude/skills', rules: '.claude/rules', settings: '.claude/settings.json', claudemd: '.claude/CLAUDE.md', agents: '.claude/agents' },
-    codex: { skills: '.codex/skills', rules: '.codex/rules', agents: '.codex/agents' },
-    'codex-internal': { skills: '.codex-internal/skills', rules: '.codex-internal/rules', agents: '.codex-internal/agents' },
+    codex: { skills: '.codex/skills', rules: '.codex/rules', settings: '.codex/hooks.json', agents: '.codex/agents' },
+    'codex-internal': { skills: '.codex-internal/skills', rules: '.codex-internal/rules', settings: '.codex-internal/hooks.json', agents: '.codex-internal/agents' },
     'claude-internal': { skills: '.claude-internal/skills', rules: '.claude-internal/rules', settings: '.claude-internal/settings.json', claudemd: '.claude-internal/CLAUDE.md', agents: '.claude-internal/agents' },
     tclaude: { skills: '.tclaude/skills', rules: '.tclaude/rules', settings: '.tclaude/settings.json', claudemd: '.tclaude/CLAUDE.md', agents: '.tclaude/agents' },
-    tcodex: { skills: '.tcodex/skills', rules: '.tcodex/rules', agents: '.tcodex/agents' },
+    tcodex: { skills: '.tcodex/skills', rules: '.tcodex/rules', settings: '.tcodex/hooks.json', agents: '.tcodex/agents' },
     cursor: { skills: '.cursor/skills', rules: '.cursor/rules', settings: '.cursor/hooks.json', agents: '.cursor/agents' },
     codebuddy: { skills: '.codebuddy/skills', rules: '.codebuddy/rules', settings: '.codebuddy/settings.json', claudemd: '.codebuddy/CODEBUDDY.md', agents: '.codebuddy/agents' },
     openclaw: { skills: '.openclaw/skills', rules: '.openclaw/rules' },
@@ -366,16 +366,6 @@ export interface UserInterventionStats {
   correction: number;
 }
 
-// ─── Session records ───────────────────────────────────
-
-export interface SessionRecord {
-  date: string;
-  summary: string;
-  toolsUsed: string[];
-  hasValue: boolean;
-  errors?: string[];
-}
-
 // ─── Dashboard ──────────────────────────────────────
 //
 //  Data flow (hook-based, zero external dependencies):
@@ -569,6 +559,10 @@ export const CORRECTION_KEYWORDS = [
 export const INTERVENTION_SCAN_MAX_BYTES = 50 * 1024 * 1024;
 /** Marker that prefixes a user-interrupt entry in the Claude Code transcript. */
 export const TRANSCRIPT_INTERRUPT_PREFIX = '[Request interrupted by user';
+/** Prefixes of system-injected user messages that are NOT genuine human prompts. */
+export const TRANSCRIPT_SYSTEM_PREFIXES = [
+  '<task-notification>',
+];
 /** Substrings that mark a tool_result as a user rejection (permission deny). */
 export const TRANSCRIPT_REJECT_MARKERS = [
   'The tool use was rejected',
@@ -758,7 +752,13 @@ export type CultureFrontmatter = z.infer<typeof CultureFrontmatterSchema>;
  * - project scope → localConfig.projectRoot (e.g. /Users/xxx/my-project)
  */
 export function resolveBaseDir(localConfig: LocalConfig): string {
-  if (localConfig.scope === 'project' && localConfig.projectRoot) {
+  if (localConfig.scope === 'project') {
+    if (!localConfig.projectRoot) {
+      throw new Error(
+        'resolveBaseDir: localConfig.scope is "project" but projectRoot is missing — ' +
+        'refusing to silently fall back to the user home directory. Re-run `teamai init` in this project.',
+      );
+    }
     return localConfig.projectRoot;
   }
   return process.env.HOME!;
@@ -770,7 +770,13 @@ export function resolveBaseDir(localConfig: LocalConfig): string {
  * - project scope → <projectRoot>/.teamai
  */
 export function getTeamaiHome(scope: Scope, projectRoot?: string): string {
-  if (scope === 'project' && projectRoot) {
+  if (scope === 'project') {
+    if (!projectRoot) {
+      throw new Error(
+        'getTeamaiHome: scope is "project" but projectRoot is missing — ' +
+        'refusing to silently fall back to the user home directory.',
+      );
+    }
     return path.join(projectRoot, '.teamai');
   }
   return path.join(process.env.HOME ?? '', '.teamai');

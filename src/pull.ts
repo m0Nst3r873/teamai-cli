@@ -708,8 +708,8 @@ async function pullForScope(
   //
   // Only injected for Tier-1 tools that have BOTH `agents` and `claudemd`
   // configured. Tools without subagent support (cursor / codex / openclaw /
-  // workbuddy) are skipped — for them the recall flow runs purely via hooks
-  // (auto-recall, TodoWrite hint) and the manual `teamai recall` command.
+  // workbuddy) are skipped — for them the recall flow runs purely via the
+  // TodoWrite hint hook and the manual `teamai recall` command.
   if (!options.dryRun) {
     try {
       const baseDir = resolveBaseDir(localConfig);
@@ -780,20 +780,12 @@ async function pullForScope(
     }
   }
 
-  // Step 5: Auto-report usage data (user scope only). This pushes usage back to
-  // the team git repo, so it only applies to git-backed repos — HTTP consumers
-  // have no local git checkout and are read-only, so skip it entirely.
-  if (!options.dryRun && localConfig.scope === 'user' && localConfig.repo.kind !== 'http') {
-    try {
-      const { reportUsageToTeam } = await import('./team-push.js');
-      await reportUsageToTeam(localConfig.repo.localPath, localConfig.username);
-    } catch (e) {
-      log.error(`Auto-report skipped: ${(e as Error).message}`);
-    }
-  }
+  // Step 5: Auto-report usage data — handled centrally in pull() to avoid
+  // double-truncation when both user and project scopes share events.
+  // (no-op here; see pull() for the unified reporting logic)
 
-  // Step 6: Show skill recommendations (user scope only)
-  if (!options.silent && !options.dryRun && localConfig.scope === 'user') {
+  // Step 6: Show skill recommendations
+  if (!options.silent && !options.dryRun) {
     try {
       const YAML = (await import('yaml')).default;
       const { listFiles, readFileSafe } = await import('./utils/fs.js');
@@ -1069,7 +1061,7 @@ export async function pull(options: GlobalOptions): Promise<void> {
   // 2. User scope — only when NOT in project mode.
   let userConfig: LocalConfig | null = null;
   if (projectMode) {
-    log.info('检测到 project scope，已跳过 user scope');
+    log.info('project scope detected, skipped user scope');
   } else {
     try {
       userConfig = await loadLocalConfigForScope('user');
@@ -1098,7 +1090,48 @@ export async function pull(options: GlobalOptions): Promise<void> {
   // session start. In project mode user is null, so user hooks are left alone.
   await reconcileHooksAllScopes(projectMode ? null : userConfig, projectConfig, options);
 
-  // 4. Pull cross-team source skills (always — even in project mode), against
+  // 4. Auto-report usage data to all active scopes. Events live in a single
+  //    shared file (~/.teamai/usage.jsonl), so we report to each repo with
+  //    skipTruncate=true first, then truncate once at the end.
+  //    Scope filtering: project scope only gets sessions whose cwd is under
+  //    projectRoot; user scope excludes those sessions.
+  if (!options.dryRun) {
+    try {
+      const { reportUsageToTeam } = await import('./team-push.js');
+      const { truncateUsageAfterReport, readUsageEvents } = await import('./usage-tracker.js');
+      const targets: Array<{ repoPath: string; username: string; opts: { skipTruncate: true; projectRoot?: string; excludeProjectRoots?: string[] } }> = [];
+      if (projectConfig) {
+        targets.push({
+          repoPath: projectConfig.repo.localPath,
+          username: projectConfig.username,
+          opts: { skipTruncate: true, projectRoot: projectConfig.projectRoot },
+        });
+      }
+      if (userConfig && userConfig.repo.kind !== 'http') {
+        targets.push({
+          repoPath: userConfig.repo.localPath,
+          username: userConfig.username,
+          opts: { skipTruncate: true, excludeProjectRoots: projectConfig?.projectRoot ? [projectConfig.projectRoot] : [] },
+        });
+      }
+
+      const eventCount = (await readUsageEvents()).length;
+      for (const t of targets) {
+        try {
+          await reportUsageToTeam(t.repoPath, t.username, t.opts);
+        } catch (e) {
+          log.error(`Auto-report to ${t.repoPath} skipped: ${(e as Error).message}`);
+        }
+      }
+      if (eventCount > 0 && targets.length > 0) {
+        await truncateUsageAfterReport(eventCount);
+      }
+    } catch (e) {
+      log.debug(`Auto-report skipped: ${(e as Error).message}`);
+    }
+  }
+
+  // 5. Pull cross-team source skills (always — even in project mode), against
   //    the active scope so deploys land in the right base dir.
   const sourceConfig = projectConfig ?? userConfig;
   if (sourceConfig) {
