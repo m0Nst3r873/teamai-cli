@@ -27,6 +27,7 @@ import { getMachineId, deriveLocalAgentId } from './machine-id.js';
 import { EXCLUDED_RULE_NAMES } from './builtin-rules.js';
 import { assertSafeResourceName } from './utils/path-safety.js';
 import { installPluginPackage, uninstallPluginPackage, getInstalledPluginVersion } from './plugin-installer.js';
+import { registerPluginService, startPluginService, stopPluginService, deregisterPluginService, serviceName } from './plugin-runner.js';
 import { logHttpRequest, logHttpResponse } from './utils/http-log.js';
 import {
   TEAMAI_HOME,
@@ -96,6 +97,16 @@ interface ManifestResource {
    * target it (scoped names like `@scope/pkg` are allowed here, unlike slugs).
    */
   package?: string;
+  /**
+   * OS-service registration for a plugin daemon, recorded when `init_plugin`
+   * registers the service. Lets `start_plugin`/`stop_plugin` act only on plugins
+   * teamai actually registered.
+   */
+  service?: {
+    name: string;
+    kind: string;
+    registered_at: string;
+  };
 }
 
 interface ManifestScope {
@@ -125,6 +136,8 @@ interface LocalAgentCommand {
   plugin_slug?: string;
   plugin_package?: string;
   plugin_version?: string;
+  /** Daemon launch command (descriptor `runtime.start`); carried by `init_plugin`. */
+  plugin_start_cmd?: string;
   resource_slug?: string;
   resource_version?: string;
   slug?: string;
@@ -841,11 +854,14 @@ function commandKind(command: LocalAgentCommand): CommandResourceKind | null {
   return null;
 }
 
-function commandAction(command: LocalAgentCommand): 'install' | 'uninstall' | null {
+function commandAction(command: LocalAgentCommand): 'install' | 'uninstall' | 'init' | 'start' | 'stop' | null {
   const type = command.type ?? '';
   if (type === '') return 'install';
   if (type.startsWith('install_')) return 'install';
   if (type.startsWith('uninstall_')) return 'uninstall';
+  if (type.startsWith('init_')) return 'init';
+  if (type.startsWith('start_')) return 'start';
+  if (type.startsWith('stop_')) return 'stop';
   return null;
 }
 
@@ -1211,6 +1227,8 @@ async function installPlugin(input: {
       source: 'enterprise',
       installed_at: new Date().toISOString(),
       package: pkg,
+      // Preserve any existing service registration across an idempotent re-sync.
+      service: scope.plugins[slug]?.service,
     };
   };
 
@@ -1265,6 +1283,16 @@ async function uninstallPlugin(input: { slug: string }): Promise<void> {
       delete scope.plugins?.[input.slug];
     });
 
+  // Tear down the OS service first, so uninstalling the package never leaves an
+  // orphaned, auto-restarting service pointing at a now-missing binary.
+  if (entry.service) {
+    try {
+      await deregisterPluginService(input.slug);
+    } catch (e) {
+      log.warn(`[local-agent] uninstall_plugin: failed to deregister service for "${input.slug}": ${(e as Error).message}`);
+    }
+  }
+
   if (!entry.package) {
     // Without the real npm package name we cannot safely target npm (the slug is
     // a teamai id, not necessarily a package name). Drop the record rather than
@@ -1275,6 +1303,72 @@ async function uninstallPlugin(input: { slug: string }): Promise<void> {
   }
   await uninstallPluginPackage(entry.package);
   await dropRecord();
+}
+
+/**
+ * Register a plugin daemon with the OS service manager (write the unit/plist/task
+ * and enable login autostart) and record the registration in the manifest. The
+ * plugin must already be installed (its manifest entry present). The daemon is
+ * not started here — that is `start_plugin`. Idempotent: re-registering rewrites
+ * the service definition and refreshes the manifest record.
+ */
+async function initPlugin(input: {
+  command: LocalAgentCommand;
+  slug: string;
+}): Promise<string | undefined> {
+  const { command, slug } = input;
+  const startCommand = command.plugin_start_cmd;
+  if (!startCommand) {
+    throw new Error(`Missing plugin_start_cmd for ${command.type ?? 'init_plugin'}`);
+  }
+
+  const manifest = await loadManifest();
+  const scopeManifest = getManifestScope(manifest, PLUGIN_SCOPE);
+  scopeManifest.plugins ??= {};
+  const entry = scopeManifest.plugins[slug];
+  if (!entry) {
+    // Refuse to register a service for a plugin we never installed — start_cmd
+    // would run a package that is not on disk.
+    throw new Error(`Cannot init plugin "${slug}": not installed`);
+  }
+
+  // startCommand comes from the trusted backend descriptor; it is embedded in
+  // the generated unit/plist (quoted) rather than passed to a shell here.
+  await registerPluginService({ slug, startCommand });
+
+  // Record the registration under the lock so it is not clobbered by a
+  // concurrent install/uninstall running in another process.
+  await withManifestLock((m) => {
+    const scope = getManifestScope(m, PLUGIN_SCOPE);
+    const current = scope.plugins?.[slug];
+    if (!current) return; // uninstalled concurrently — nothing to annotate
+    current.service = {
+      name: serviceName(slug),
+      kind: 'daemon',
+      registered_at: new Date().toISOString(),
+    };
+  });
+  return entry.version;
+}
+
+/**
+ * Start (or stop) a plugin's registered service. Requires the manifest to record
+ * an `init_plugin` registration for the slug; otherwise it is a no-op, so teamai
+ * never starts/stops a service it did not create.
+ */
+async function runPluginService(action: 'start' | 'stop', slug: string): Promise<void> {
+  const manifest = await loadManifest();
+  const scopeManifest = getManifestScope(manifest, PLUGIN_SCOPE);
+  const entry = scopeManifest.plugins?.[slug];
+  if (!entry?.service) {
+    log.debug(`[local-agent] ${action}_plugin: no registered service for "${slug}", skipping`);
+    return;
+  }
+  if (action === 'start') {
+    await startPluginService(slug);
+  } else {
+    await stopPluginService(slug);
+  }
 }
 
 async function syncClaudemd(
@@ -1368,8 +1462,20 @@ async function executeCommand(
     if (action === 'install') {
       return installPlugin({ command, slug });
     }
+    if (action === 'init') {
+      return initPlugin({ command, slug });
+    }
+    if (action === 'start' || action === 'stop') {
+      await runPluginService(action, slug);
+      return commandVersion(command, kind);
+    }
     await uninstallPlugin({ slug });
     return commandVersion(command, kind);
+  }
+
+  // init/start/stop are daemon lifecycle actions that only apply to plugins.
+  if (action !== 'install' && action !== 'uninstall') {
+    throw new Error(`Action "${action}" is only supported for plugins, not ${kind}`);
   }
 
   const scope = command.scope ?? 'user';
